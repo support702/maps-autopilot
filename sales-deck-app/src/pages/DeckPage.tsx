@@ -12,11 +12,12 @@ import { Slide05Phase2 } from "../slides/Slide05Phase2";
 import { Slide06Proof } from "../slides/Slide06Proof";
 import { Slide07Guarantee } from "../slides/Slide07Guarantee";
 import { Slide08Territory } from "../slides/Slide08Territory";
-import { Slide09Pricing } from "../slides/Slide09Pricing";
+import { Slide09A } from "../slides/Slide09A";
+import { Slide09B } from "../slides/Slide09B";
 import { Slide10NextDays } from "../slides/Slide10NextDays";
 import { Slide11End } from "../slides/Slide11End";
 
-const TOTAL_SLIDES = 11;
+const TOTAL_SLIDES = 12;
 
 export function DeckPage() {
   const { auditId } = useParams();
@@ -73,9 +74,10 @@ export function DeckPage() {
       case 5: return <Slide06Proof data={data} />;
       case 6: return <Slide07Guarantee tier={tier} />;
       case 7: return <Slide08Territory data={data} />;
-      case 8: return <Slide09Pricing data={data} />;
-      case 9: return <Slide10NextDays />;
-      case 10: return <Slide11End data={data} />;
+      case 8: return <Slide09A data={data} />;
+      case 9: return <Slide09B data={data} />;
+      case 10: return <Slide10NextDays />;
+      case 11: return <Slide11End data={data} />;
       default: return <Slide01Hook data={data} />;
     }
   }
