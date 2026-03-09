@@ -1,0 +1,683 @@
+/**
+ * WF12 — Pre-Call Sales Intelligence Pipeline
+ * Location: src/trigger/wf12-pre-call-pipeline.ts
+ *
+ * Fires when a prospect books a sales call via GHL webhook. Performs a full
+ * intelligence sweep: Google Places lookup, market classification, revenue math,
+ * Slack briefing, sales rep email, GHL tagging, and cold-lead alerting.
+ *
+ * Depends on: src/lib/db.ts, src/lib/email.ts, src/lib/ghl.ts
+ * Output: prospect_audits row + static JSON for sales-deck-app + Slack post + email
+ */
+
+import { task } from "@trigger.dev/sdk";
+import { query } from "../lib/db";
+import { sendEmail } from "../lib/email";
+import { createContact } from "../lib/ghl";
+import axios from "axios";
+import { writeFileSync, mkdirSync } from "fs";
+import { join } from "path";
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+interface WF12Payload {
+  business_name: string;
+  city: string;
+  state: string;
+  niche_key: string;
+  years_in_business: string; // "1-3", "3-5 years", "5+"
+  has_gbp: string;           // "Yes" or "No"
+  review_estimate: string;   // "0-10", "10-30", "30-100", "100+"
+  contact_name: string;
+  contact_email: string;
+  sales_rep_email: string;
+  sales_rep_name: string;
+  appointment_date: string;
+  appointment_time: string;
+}
+
+interface PlaceResult {
+  name: string;
+  place_id: string;
+  rating: number;
+  user_ratings_total: number;
+  photos?: unknown[];
+}
+
+type MarketTier = "A" | "B" | "C";
+type LeadTemperature = "Hot" | "Warm" | "Cool" | "Cold";
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+const AVG_TICKETS: Record<string, number> = {
+  mechanical: 450,
+  hvac: 800,
+  dental: 1200,
+  plumbing: 350,
+  roofing: 8500,
+  default: 500,
+};
+
+const GUARANTEE_TEXT: Record<MarketTier, string> = {
+  A: "Strong — Top 3 guarantee eligible",
+  B: "Moderate — Soft guarantee possible",
+  C: "Competitive — No guarantee recommended",
+};
+
+const REVIEW_ESTIMATE_MAP: Record<string, number> = {
+  "0-10": 5,
+  "10-30": 20,
+  "30-100": 65,
+  "100+": 150,
+};
+
+const OPERATOR_EMAIL = "tom@haildentpro.com";
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function parseReviewEstimate(est: string): number {
+  return REVIEW_ESTIMATE_MAP[est] || 10;
+}
+
+function classifyMarketTier(
+  totalCompetitors: number,
+  hasGbp: string
+): MarketTier {
+  if (totalCompetitors < 20 && hasGbp === "Yes") return "A";
+  if (totalCompetitors >= 20 && totalCompetitors <= 50) return "B";
+  return "C";
+}
+
+function classifyLeadTemperature(
+  reviews: number,
+  yearsStr: string,
+  tier: MarketTier
+): LeadTemperature {
+  const has5Plus = yearsStr.includes("5");
+  const has3Plus = yearsStr.includes("3") || has5Plus;
+
+  if (reviews >= 30 && has5Plus && tier === "A") return "Hot";
+  if (reviews >= 10 && has3Plus && (tier === "A" || tier === "B")) return "Warm";
+  if (reviews < 10 && yearsStr.includes("1") && (tier === "B" || tier === "C"))
+    return "Cool";
+  return "Cold";
+}
+
+function estimateMissedCalls(prospectRank: number, tier: MarketTier): number {
+  const baseByTier: Record<MarketTier, number> = { A: 40, B: 25, C: 15 };
+  const base = baseByTier[tier];
+  const rankPenalty = Math.min(prospectRank * 3, base * 0.8);
+  return Math.max(5, Math.round(base - rankPenalty));
+}
+
+// ---------------------------------------------------------------------------
+// Task
+// ---------------------------------------------------------------------------
+
+export const wf12PreCallPipeline = task({
+  id: "wf12-pre-call-pipeline",
+  retry: { maxAttempts: 2 },
+  run: async (rawPayload: WF12Payload) => {
+    // Unwrap if proxy-wrapped
+    const payload: WF12Payload =
+      rawPayload.business_name || rawPayload.city
+        ? rawPayload
+        : ((rawPayload as unknown as Record<string, unknown>).payload as WF12Payload) ||
+          rawPayload;
+
+    console.log(
+      `[WF12] Starting pre-call pipeline for: ${payload.business_name} in ${payload.city}, ${payload.state}`
+    );
+
+    // ------------------------------------------------------------------
+    // Step 1: Google Places — prospect + competitors
+    // ------------------------------------------------------------------
+
+    let prospectPlace: PlaceResult | null = null;
+    let allCompetitors: PlaceResult[] = [];
+
+    try {
+      const searchUrl = `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${encodeURIComponent(
+        payload.business_name + " " + payload.city + " " + payload.state
+      )}&key=${process.env.GOOGLE_API_KEY}`;
+      const { data: searchData } = await axios.get(searchUrl, {
+        timeout: 10000,
+      });
+
+      if (searchData.results?.length > 0) {
+        const r = searchData.results[0];
+        prospectPlace = {
+          name: r.name,
+          place_id: r.place_id,
+          rating: r.rating || 0,
+          user_ratings_total: r.user_ratings_total || 0,
+          photos: r.photos,
+        };
+      }
+    } catch (err) {
+      console.error("[WF12] Google Places prospect search failed:", err);
+    }
+
+    // ------------------------------------------------------------------
+    // Step 2: Load niche config
+    // ------------------------------------------------------------------
+
+    const { rows: nicheRows } = await query(
+      "SELECT * FROM niche_configs WHERE niche_key = $1",
+      [payload.niche_key || "mechanical"]
+    );
+    const nicheConfig = nicheRows[0] || null;
+    const nicheName = nicheConfig?.niche_name || payload.niche_key;
+
+    // Search for competitors using niche name
+    try {
+      const compUrl = `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${encodeURIComponent(
+        nicheName + " in " + payload.city + " " + payload.state
+      )}&key=${process.env.GOOGLE_API_KEY}`;
+      const { data: compData } = await axios.get(compUrl, { timeout: 10000 });
+
+      if (compData.results?.length > 0) {
+        allCompetitors = compData.results
+          .filter(
+            (r: Record<string, unknown>) =>
+              r.place_id !== prospectPlace?.place_id
+          )
+          .map((r: Record<string, unknown>) => ({
+            name: r.name as string,
+            place_id: r.place_id as string,
+            rating: (r.rating as number) || 0,
+            user_ratings_total: (r.user_ratings_total as number) || 0,
+            photos: r.photos,
+          }));
+      }
+    } catch (err) {
+      console.error("[WF12] Google Places competitor search failed:", err);
+    }
+
+    // Sort by review count descending, take top 5 for analysis, top 3 for display
+    allCompetitors.sort(
+      (a, b) => b.user_ratings_total - a.user_ratings_total
+    );
+    const topCompetitors = allCompetitors.slice(0, 3);
+    const totalCompetitors = allCompetitors.length;
+
+    const prospectReviews = prospectPlace?.user_ratings_total || 0;
+    const prospectRating = prospectPlace?.rating || 0;
+
+    // Determine prospect rank among all competitors
+    const allSorted = [...allCompetitors];
+    if (prospectPlace) {
+      allSorted.push(prospectPlace);
+      allSorted.sort((a, b) => b.user_ratings_total - a.user_ratings_total);
+    }
+    const prospectRank =
+      allSorted.findIndex(
+        (p) => p.place_id === prospectPlace?.place_id
+      ) + 1 || totalCompetitors + 1;
+
+    // Review gap: how many reviews behind the average of top 3
+    const top3AvgReviews =
+      topCompetitors.length > 0
+        ? Math.round(
+            topCompetitors.reduce(
+              (sum, c) => sum + c.user_ratings_total,
+              0
+            ) / topCompetitors.length
+          )
+        : 0;
+    const reviewGap = Math.max(0, top3AvgReviews - prospectReviews);
+
+    // ------------------------------------------------------------------
+    // Step 3: Market classification
+    // ------------------------------------------------------------------
+
+    const tier = classifyMarketTier(totalCompetitors, payload.has_gbp);
+    const estimatedReviews = parseReviewEstimate(payload.review_estimate);
+    const temperature = classifyLeadTemperature(
+      estimatedReviews,
+      payload.years_in_business,
+      tier
+    );
+
+    console.log(
+      `[WF12] Market tier: ${tier}, Lead temp: ${temperature}, Competitors: ${totalCompetitors}`
+    );
+
+    // ------------------------------------------------------------------
+    // Step 4: Revenue math
+    // ------------------------------------------------------------------
+
+    const missedCalls = estimateMissedCalls(prospectRank, tier);
+    const avgTicket = AVG_TICKETS[payload.niche_key] || AVG_TICKETS.default;
+    const lostMonthly = missedCalls * avgTicket;
+    const lostAnnual = lostMonthly * 12;
+    const monthlyPrice = nicheConfig?.suggested_price || 500;
+    const setupFee = monthlyPrice * 3;
+
+    // ------------------------------------------------------------------
+    // Step 5: Save to database
+    // ------------------------------------------------------------------
+
+    const auditId = `${payload.niche_key}-${payload.city
+      .toLowerCase()
+      .replace(/\s+/g, "-")}-${Date.now()}`;
+
+    const competitorData = {
+      competitors: topCompetitors,
+      market_tier: tier,
+      lead_temperature: temperature,
+      offer_path: tier === "A" ? "Core" : "Premium",
+      missed_calls: missedCalls,
+      avg_ticket: avgTicket,
+      lost_monthly: lostMonthly,
+      lost_annual: lostAnnual,
+      monthly_price: monthlyPrice,
+      setup_fee: setupFee,
+      sales_rep_email: payload.sales_rep_email,
+      sales_rep_name: payload.sales_rep_name,
+      appointment_date: payload.appointment_date,
+      appointment_time: payload.appointment_time,
+      prospect_rank: prospectRank,
+      review_gap: reviewGap,
+      contact_name: payload.contact_name,
+      contact_email: payload.contact_email,
+      audit_id: auditId,
+      state: payload.state,
+    };
+
+    try {
+      await query(
+        `INSERT INTO prospect_audits (
+          business_name, city, niche_key,
+          gbp_review_count, gbp_avg_rating, top_competitors,
+          market_competition_level, guarantee_eligible,
+          created_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())`,
+        [
+          payload.business_name,
+          payload.city,
+          payload.niche_key,
+          prospectReviews,
+          prospectRating,
+          JSON.stringify(competitorData),
+          tier,
+          tier === "A" || tier === "B",
+        ]
+      );
+    } catch (err) {
+      console.error("[WF12] Failed to insert prospect_audits:", err);
+    }
+
+    // Write static JSON for the sales deck app
+    const auditDir =
+      "/Users/titanbot/maps-autopilot/sales-deck-app/public/audits";
+    try {
+      mkdirSync(auditDir, { recursive: true });
+      const deckData = {
+        audit_id: auditId,
+        prospect_name: payload.business_name,
+        prospect_city: payload.city,
+        prospect_state: payload.state,
+        niche_label: nicheName,
+        prospect_rank: `#${prospectRank}`,
+        prospect_reviews: String(prospectReviews),
+        prospect_rating: String(prospectRating),
+        comp1_name: topCompetitors[0]?.name || "",
+        comp1_reviews: String(topCompetitors[0]?.user_ratings_total || 0),
+        comp1_rating: String(topCompetitors[0]?.rating || 0),
+        comp2_name: topCompetitors[1]?.name || "",
+        comp2_reviews: String(topCompetitors[1]?.user_ratings_total || 0),
+        comp2_rating: String(topCompetitors[1]?.rating || 0),
+        comp3_name: topCompetitors[2]?.name || "",
+        comp3_reviews: String(topCompetitors[2]?.user_ratings_total || 0),
+        comp3_rating: String(topCompetitors[2]?.rating || 0),
+        review_gap: String(reviewGap),
+        missed_calls: String(missedCalls),
+        avg_ticket: String(avgTicket),
+        lost_monthly: lostMonthly.toLocaleString(),
+        lost_annual: lostAnnual.toLocaleString(),
+        monthly_price: String(monthlyPrice),
+        setup_fee: String(setupFee),
+        market_tier: tier,
+      };
+      writeFileSync(
+        join(auditDir, `${auditId}.json`),
+        JSON.stringify(deckData, null, 2)
+      );
+    } catch (err) {
+      console.error("[WF12] Failed to write audit JSON file:", err);
+    }
+
+    // ------------------------------------------------------------------
+    // Step 6: Generate deck URL
+    // ------------------------------------------------------------------
+
+    const deckUrl = `http://147.182.235.147:3008/deck/${auditId}?tier=${tier}`;
+
+    // ------------------------------------------------------------------
+    // Step 7: Slack briefing
+    // ------------------------------------------------------------------
+
+    // Territory conflict check
+    let conflictStatus = "✅ Open — no conflicts";
+    try {
+      const { rows: conflicts } = await query(
+        `SELECT client_id, business_name FROM clients
+         WHERE LOWER(city) = LOWER($1) AND niche_key = $2 AND status = 'active'`,
+        [payload.city, payload.niche_key]
+      );
+      if (conflicts.length > 0) {
+        conflictStatus = `⚠️ CONFLICT: ${conflicts
+          .map((c) => c.business_name)
+          .join(", ")}`;
+      }
+    } catch (err) {
+      console.error("[WF12] Territory conflict check failed:", err);
+    }
+
+    // Qualification checklist
+    const reviews = parseReviewEstimate(payload.review_estimate);
+    const yrs = payload.years_in_business;
+    const qualChecks = [
+      { label: "Has GBP", pass: payload.has_gbp === "Yes" },
+      { label: "10+ reviews", pass: reviews >= 10 },
+      {
+        label: "3+ years",
+        pass: yrs.includes("3") || yrs.includes("5"),
+      },
+      { label: "Market Tier A/B", pass: tier === "A" || tier === "B" },
+      {
+        label: "No territory conflict",
+        pass: conflictStatus.startsWith("✅"),
+      },
+      {
+        label: "Guarantee eligible",
+        pass: tier === "A" || tier === "B",
+      },
+    ];
+    const passCount = qualChecks.filter((q) => q.pass).length;
+    const checklistText = qualChecks
+      .map((q) => `${q.pass ? "✅" : "❌"} ${q.label}`)
+      .join("\n");
+
+    const slackMessage = `🎯 PRE-CALL BRIEFING: ${payload.business_name} — ${payload.city}, ${payload.state}
+
+📊 MARKET ASSESSMENT
+Market Tier: ${tier} — ${GUARANTEE_TEXT[tier]}
+Lead Temperature: ${temperature}
+Competitors: ${totalCompetitors}
+Territory: ${conflictStatus}
+
+📈 PROSPECT DATA
+Reviews: ${prospectReviews} (⭐ ${prospectRating})
+Current Rank: #${prospectRank}
+Top Competitor: ${topCompetitors[0]?.name || "N/A"} (${
+      topCompetitors[0]?.user_ratings_total || 0
+    } reviews, ⭐ ${topCompetitors[0]?.rating || "N/A"})
+Review Gap: ${reviewGap} reviews behind top 3
+
+💰 MONEY MATH
+Missed calls: ~${missedCalls}/month
+Lost revenue: ~$${lostMonthly.toLocaleString()}/month (~$${lostAnnual.toLocaleString()}/year)
+Avg ticket: $${avgTicket}
+
+🎯 OFFER PATH
+→ Show ${tier === "A" ? "Core" : "Premium"} pricing ($${monthlyPrice}/mo)
+→ Present ${GUARANTEE_TEXT[tier]}
+→ Lead with territory lock (${conflictStatus})
+→ Close on Waived Fee annual
+
+📋 QUALIFICATION (${passCount}/6 ✅)
+${checklistText}
+
+📎 DECK: ${deckUrl}
+
+📞 Call: ${payload.appointment_date} at ${payload.appointment_time}`;
+
+    if (process.env.SLACK_WEBHOOK_URL) {
+      try {
+        await axios.post(process.env.SLACK_WEBHOOK_URL, {
+          text: slackMessage,
+        });
+      } catch (err) {
+        console.error("[WF12] Slack post failed:", err);
+      }
+    }
+
+    // ------------------------------------------------------------------
+
+    // ------------------------------------------------------------------
+    // Step 7.5: Generate Money Snapshot PDF
+    // ------------------------------------------------------------------
+
+    let pdfPath: string | null = null;
+    const snapshotUrl = `http://147.182.235.147:3008/snapshot/${auditId}`;
+
+    try {
+      const puppeteer = await import("puppeteer");
+      const browser = await puppeteer.default.launch({
+        headless: true,
+        args: ["--no-sandbox", "--disable-setuid-sandbox"],
+      });
+      const page = await browser.newPage();
+
+      await page.goto(snapshotUrl, {
+        waitUntil: "networkidle0",
+        timeout: 30000,
+      });
+
+      // Wait for content to render
+      await page.waitForSelector("[data-snapshot-ready]", { timeout: 10000 });
+
+      pdfPath = `/tmp/snapshot-${auditId}.pdf`;
+      await page.pdf({
+        path: pdfPath,
+        format: "Letter",
+        printBackground: true,
+        margin: { top: "0", right: "0", bottom: "0", left: "0" },
+      });
+
+      await browser.close();
+
+      console.log(`[WF12] PDF generated: ${pdfPath}`);
+
+      // Upload PDF to Slack
+      if (process.env.SLACK_BOT_TOKEN && pdfPath) {
+        try {
+          const FormData = (await import("form-data")).default;
+          const fs = await import("fs");
+
+          const form = new FormData();
+          form.append("file", fs.createReadStream(pdfPath));
+          form.append("channels", "maps-sales"); // Replace with actual channel ID if needed
+          form.append("initial_comment", `💰 Money Snapshot for ${payload.business_name}`);
+
+          await axios.post("https://slack.com/api/files.upload", form, {
+            headers: {
+              ...form.getHeaders(),
+              Authorization: `Bearer ${process.env.SLACK_BOT_TOKEN}`,
+            },
+          });
+
+          console.log("[WF12] PDF uploaded to Slack");
+        } catch (err) {
+          console.error("[WF12] Slack PDF upload failed:", err);
+        }
+      }
+    } catch (err) {
+      console.error("[WF12] PDF generation failed:", err);
+    }
+
+    // Step 8: Email sales rep
+    // ------------------------------------------------------------------
+
+    const emailHtml = `
+<div style="font-family: Arial, sans-serif; max-width: 700px; margin: 0 auto;">
+  <h2 style="color: #1a1a2e;">🎯 Pre-Call Briefing: ${payload.business_name}</h2>
+  <p><strong>Market:</strong> ${payload.city}, ${payload.state} | <strong>Tier:</strong> ${tier} | <strong>Temperature:</strong> ${temperature}</p>
+
+  <table style="width: 100%; border-collapse: collapse; margin: 16px 0;">
+    <tr style="background: #f0f0f5;">
+      <td style="padding: 8px; border: 1px solid #ddd;"><strong>Reviews</strong></td>
+      <td style="padding: 8px; border: 1px solid #ddd;">${prospectReviews} (⭐ ${prospectRating})</td>
+    </tr>
+    <tr>
+      <td style="padding: 8px; border: 1px solid #ddd;"><strong>Current Rank</strong></td>
+      <td style="padding: 8px; border: 1px solid #ddd;">#${prospectRank}</td>
+    </tr>
+    <tr style="background: #f0f0f5;">
+      <td style="padding: 8px; border: 1px solid #ddd;"><strong>Review Gap</strong></td>
+      <td style="padding: 8px; border: 1px solid #ddd;">${reviewGap} reviews behind top 3</td>
+    </tr>
+    <tr>
+      <td style="padding: 8px; border: 1px solid #ddd;"><strong>Missed Calls</strong></td>
+      <td style="padding: 8px; border: 1px solid #ddd;">~${missedCalls}/month</td>
+    </tr>
+    <tr style="background: #fff3cd;">
+      <td style="padding: 8px; border: 1px solid #ddd;"><strong>Lost Revenue</strong></td>
+      <td style="padding: 8px; border: 1px solid #ddd;"><strong>~$${lostMonthly.toLocaleString()}/month (~$${lostAnnual.toLocaleString()}/year)</strong></td>
+    </tr>
+    <tr>
+      <td style="padding: 8px; border: 1px solid #ddd;"><strong>Territory</strong></td>
+      <td style="padding: 8px; border: 1px solid #ddd;">${conflictStatus}</td>
+    </tr>
+    <tr style="background: #f0f0f5;">
+      <td style="padding: 8px; border: 1px solid #ddd;"><strong>Guarantee</strong></td>
+      <td style="padding: 8px; border: 1px solid #ddd;">${GUARANTEE_TEXT[tier]}</td>
+    </tr>
+  </table>
+
+  <h3>Top Competitors</h3>
+  <table style="width: 100%; border-collapse: collapse; margin: 8px 0;">
+    <tr style="background: #1a1a2e; color: white;">
+      <th style="padding: 8px; text-align: left;">Name</th>
+      <th style="padding: 8px; text-align: center;">Reviews</th>
+      <th style="padding: 8px; text-align: center;">Rating</th>
+    </tr>
+    ${topCompetitors
+      .map(
+        (c, i) => `
+    <tr style="background: ${i % 2 === 0 ? "#f9f9f9" : "#fff"};">
+      <td style="padding: 8px; border: 1px solid #ddd;">${c.name}</td>
+      <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">${c.user_ratings_total}</td>
+      <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">⭐ ${c.rating}</td>
+    </tr>`
+      )
+      .join("")}
+  </table>
+
+  <h3>Qualification (${passCount}/6)</h3>
+  <pre style="background: #f5f5f5; padding: 12px; border-radius: 4px;">${checklistText}</pre>
+
+  <h3>Offer Path</h3>
+  <p>→ Show <strong>${tier === "A" ? "Core" : "Premium"}</strong> pricing ($${monthlyPrice}/mo + $${setupFee} setup)</p>
+
+  <div style="text-align: center; margin: 24px 0;">
+    <a href="${deckUrl}" style="background: #1a1a2e; color: white; padding: 14px 28px; text-decoration: none; border-radius: 6px; font-size: 16px;">Open Sales Deck</a>
+  </div>
+
+  <p style="color: #666; font-size: 13px;">Call scheduled: ${payload.appointment_date} at ${payload.appointment_time} | Contact: ${payload.contact_name} (${payload.contact_email})</p>
+</div>`;
+
+    try {
+      await sendEmail(
+        payload.sales_rep_email,
+        `🎯 Pre-Call Briefing: ${payload.business_name} — ${payload.city}, ${payload.state}`,
+        emailHtml
+      );
+    } catch (err) {
+      console.error("[WF12] Sales rep email failed:", err);
+    }
+
+    // ------------------------------------------------------------------
+    // Step 9: Update GHL contact
+    // ------------------------------------------------------------------
+
+    try {
+      await createContact({
+        firstName: payload.contact_name,
+        email: payload.contact_email,
+        phone: "",
+        tags: [
+          `Market Tier ${tier}`,
+          `Lead Score - ${temperature}`,
+          tier === "A"
+            ? "Guarantee Eligible"
+            : tier === "B"
+              ? "Guarantee Soft"
+              : "Guarantee None",
+          "Audit Complete",
+        ],
+      });
+    } catch (err) {
+      console.error("[WF12] GHL contact update failed:", err);
+    }
+
+    // ------------------------------------------------------------------
+    // Step 10: Cold lead alert
+    // ------------------------------------------------------------------
+
+    if (temperature === "Cold") {
+      const coldAlert = `⚠️ COLD LEAD ALERT: ${payload.business_name}
+
+This prospect scored COLD:
+- Market Tier: ${tier}
+- Reviews: ${reviews} (estimated)
+- Years: ${payload.years_in_business}
+- Has GBP: ${payload.has_gbp}
+
+Call booked for ${payload.appointment_date} at ${payload.appointment_time}
+
+OPTIONS:
+→ APPROVE to proceed
+→ REDIRECT to Premium pitch
+→ CANCEL to decline`;
+
+      if (process.env.SLACK_WEBHOOK_URL) {
+        try {
+          await axios.post(process.env.SLACK_WEBHOOK_URL, {
+            text: coldAlert,
+          });
+        } catch {
+          // Slack alert is best-effort
+        }
+      }
+
+      try {
+        await sendEmail(
+          OPERATOR_EMAIL,
+          `⚠️ COLD LEAD: ${payload.business_name}`,
+          `<pre>${coldAlert}</pre>`
+        );
+      } catch {
+        // Operator email is best-effort
+      }
+    }
+
+    // ------------------------------------------------------------------
+    // Step 11: Return result
+    // ------------------------------------------------------------------
+
+    console.log(
+      `[WF12] Pipeline complete for ${payload.business_name}. Tier: ${tier}, Temp: ${temperature}`
+    );
+
+    return {
+      success: true,
+      audit_id: auditId,
+      business_name: payload.business_name,
+      market_tier: tier,
+      lead_temperature: temperature,
+      deck_url: deckUrl,
+      missed_calls: missedCalls,
+      lost_monthly: lostMonthly,
+      lost_annual: lostAnnual,
+    };
+  },
+});
