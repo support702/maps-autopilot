@@ -1,0 +1,7 @@
+node_modules/
+dist/
+logs/
+output/
+raw/
+.env
+_temp_*
