@@ -1,2 +1,9 @@
 .triggervideo-ads/node_modules/
 video-ads/.remotion/
+.trigger/
+.env
+content-engine/node_modules/
+content-engine/dist/
+content-engine/logs/
+content-engine/raw/
+content-engine/output/

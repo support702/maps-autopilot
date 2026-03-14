@@ -1,31 +1,61 @@
+/**
+ * Slack Notifications
+ */
+
 import { WebClient } from '@slack/web-api';
 
-const DEFAULT_CHANNEL = '#content-output';
+const slack = new WebClient(process.env.SLACK_BOT_TOKEN);
 
-function getSlackClient(): WebClient | null {
-  const token = process.env.SLACK_BOT_TOKEN;
-  if (!token) {
-    console.warn('[Slack] SLACK_BOT_TOKEN not set — notifications disabled');
-    return null;
-  }
-  return new WebClient(token);
-}
-
-export async function notifySlack(
-  message: string,
-  channel: string = DEFAULT_CHANNEL
-): Promise<void> {
-  const client = getSlackClient();
-  if (!client) return;
-
+/**
+ * Post simple text message to #content-output
+ */
+export async function notifySlack(message: string): Promise<void> {
   try {
-    await client.chat.postMessage({
-      channel,
+    await slack.chat.postMessage({
+      channel: '#content-output',
       text: message,
     });
-    console.log(`[Slack] Notification sent to ${channel}`);
+
+    console.log(`[Slack] Notification sent`);
+  } catch (error) {
+    console.error('[Slack] Failed to send notification:', error);
+  }
+}
+
+/**
+ * Post error notification to #maps-engineering
+ */
+export async function notifyError(error: Error, context: string): Promise<void> {
+  try {
+    await slack.chat.postMessage({
+      channel: '#maps-engineering',
+      text: `❌ Content Engine Error: ${context}`,
+      blocks: [
+        {
+          type: 'header',
+          text: {
+            type: 'plain_text',
+            text: '❌ Content Engine Error',
+          },
+        },
+        {
+          type: 'section',
+          fields: [
+            {
+              type: 'mrkdwn',
+              text: `*Context:* ${context}`,
+            },
+            {
+              type: 'mrkdwn',
+              text: `*Error:* ${error.message}`,
+            },
+          ],
+        },
+      ],
+    });
+
+    console.log(`[Slack] Error notification sent: ${context}`);
   } catch (err) {
-    const errorMessage = err instanceof Error ? err.message : String(err);
-    console.warn(`[Slack] Failed to send notification: ${errorMessage}`);
+    console.error('[Slack] Failed to send error notification:', err);
   }
 }

@@ -1,65 +1,97 @@
-import ffmpeg from 'fluent-ffmpeg';
-import { AUDIO_SETTINGS } from '../config/brand';
+/**
+ * FFmpeg Audio/Video Processing
+ */
 
-function runFfmpeg(command: ffmpeg.FfmpegCommand): Promise<void> {
+import ffmpeg from 'fluent-ffmpeg';
+import path from 'path';
+
+/**
+ * Extract audio from video file
+ */
+export async function extractAudio(videoPath: string, audioPath: string): Promise<void> {
+  console.log(`[FFmpeg] Extracting audio from ${path.basename(videoPath)}`);
+
   return new Promise((resolve, reject) => {
-    command
-      .on('end', () => resolve())
-      .on('error', (err: Error) => reject(err))
+    ffmpeg(videoPath)
+      .output(audioPath)
+      .audioCodec('pcm_s16le')
+      .audioFrequency(16000)
+      .audioChannels(1)
+      .on('end', () => {
+        console.log(`[FFmpeg] Audio extracted`);
+        resolve();
+      })
+      .on('error', (err) => {
+        console.error('[FFmpeg] Extraction error:', err.message);
+        reject(err);
+      })
       .run();
   });
 }
 
-export async function extractAudio(
-  videoPath: string,
-  outputPath: string
-): Promise<void> {
-  const command = ffmpeg(videoPath)
-    .noVideo()
-    .audioCodec('pcm_s16le')
-    .audioFrequency(16000)
-    .audioChannels(1)
-    .output(outputPath);
+/**
+ * Normalize audio loudness to -14 LUFS
+ */
+export async function normalizeAudio(inputPath: string, outputPath: string): Promise<void> {
+  console.log(`[FFmpeg] Normalizing audio`);
 
-  await runFfmpeg(command);
+  return new Promise((resolve, reject) => {
+    ffmpeg(inputPath)
+      .audioFilters([
+        'highpass=f=80',
+        'acompressor=threshold=-20dB:ratio=2:attack=5:release=50',
+        'loudnorm=I=-14:TP=-1.5:LRA=11'
+      ])
+      .audioCodec('pcm_s16le')
+      .output(outputPath)
+      .on('end', () => {
+        console.log(`[FFmpeg] Audio normalized`);
+        resolve();
+      })
+      .on('error', (err) => {
+        console.error('[FFmpeg] Normalization error:', err.message);
+        reject(err);
+      })
+      .run();
+  });
 }
 
-export async function normalizeAudio(
-  inputPath: string,
-  outputPath: string
-): Promise<void> {
-  const { highpassFreq, compressionRatio, compressionThreshold, targetLUFS } =
-    AUDIO_SETTINGS;
-
-  const audioFilters = [
-    `highpass=f=${highpassFreq}`,
-    `acompressor=ratio=${compressionRatio}:threshold=${compressionThreshold}dB:attack=5:release=50`,
-    `loudnorm=I=${targetLUFS}:TP=-1.5:LRA=11`,
-  ].join(',');
-
-  const command = ffmpeg(inputPath)
-    .audioFilters(audioFilters)
-    .output(outputPath);
-
-  await runFfmpeg(command);
-}
-
+/**
+ * Mix background music with video, applying sidechain ducking
+ */
 export async function mixBackgroundMusic(
   videoPath: string,
   musicPath: string,
   outputPath: string
 ): Promise<void> {
-  const { musicVolume } = AUDIO_SETTINGS;
+  console.log(`[FFmpeg] Mixing background music: ${path.basename(musicPath)}`);
 
-  const command = ffmpeg()
-    .input(videoPath)
-    .input(musicPath)
-    .complexFilter([
-      `[1:a]volume=${musicVolume}[music]`,
-      `[0:a][music]sidechaincompress=threshold=0.02:ratio=6:attack=10:release=200[mixed]`,
-    ])
-    .outputOptions(['-map', '0:v', '-map', '[mixed]', '-c:v', 'copy', '-shortest'])
-    .output(outputPath);
-
-  await runFfmpeg(command);
+  return new Promise((resolve, reject) => {
+    ffmpeg()
+      .input(videoPath)
+      .input(musicPath)
+      .complexFilter([
+        '[1:a]volume=0.1[music]',
+        '[0:a]asplit[voice][sc]',
+        '[music][sc]sidechaincompress=threshold=0.02:ratio=4:attack=200:release=1000[ducked]',
+        '[voice][ducked]amix=inputs=2:duration=first[out]'
+      ])
+      .outputOptions([
+        '-map', '0:v',
+        '-map', '[out]',
+        '-c:v', 'copy',
+        '-c:a', 'aac',
+        '-b:a', '192k'
+      ])
+      .output(outputPath)
+      .on('end', () => {
+        console.log(`[FFmpeg] Background music mixed`);
+        resolve();
+      })
+      .on('error', (err) => {
+        console.error('[FFmpeg] Music mixing error:', err.message);
+        reject(err);
+      })
+      .run();
+  });
 }

@@ -1,20 +1,25 @@
+/**
+ * PM2 Configuration for Content Engine
+ */
+
 module.exports = {
-  apps: [
-    {
-      name: 'content-engine',
-      script: 'dist/index.js',
-      env: {
-        PORT: 3012,
-        NODE_ENV: 'production',
-      },
-      watch: false,
-      max_memory_restart: '2G',
-      autorestart: true,
-      exp_backoff_restart_delay: 100,
-      out_file: './logs/content-engine-out.log',
-      error_file: './logs/content-engine-error.log',
-      merge_logs: true,
-      time: true,
+  apps: [{
+    name: 'content-engine',
+    script: './dist/index.js',
+    instances: 1,
+    exec_mode: 'fork',
+    watch: false,
+    max_memory_restart: '1G',
+    env: {
+      NODE_ENV: 'production',
+      PORT: 3012
     },
-  ],
+    error_file: './logs/error.log',
+    out_file: './logs/out.log',
+    log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
+    merge_logs: true,
+    autorestart: true,
+    max_restarts: 10,
+    min_uptime: '10s',
+  }]
 };
