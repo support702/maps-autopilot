@@ -47,7 +47,7 @@ pm2 start ecosystem.config.js
 
 1. Drop `.mp4`/`.mov`/`.avi`/`.mkv` files into `raw/`
 2. Engine auto-processes and exports to `output/{date}/{title}/`
-3. Slack notification sent to #content-output
+3. Slack notification sent to #maps-content-output
 
 ### Optional: Background Music
 

@@ -7,12 +7,12 @@ import { WebClient } from '@slack/web-api';
 const slack = new WebClient(process.env.SLACK_BOT_TOKEN);
 
 /**
- * Post simple text message to #content-output
+ * Post simple text message to #maps-content-output
  */
 export async function notifySlack(message: string): Promise<void> {
   try {
     await slack.chat.postMessage({
-      channel: '#content-output',
+      channel: '#maps-content-output',
       text: message,
     });
 
