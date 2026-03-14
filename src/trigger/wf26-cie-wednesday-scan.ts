@@ -7,15 +7,17 @@
  * Google algorithm updates, GBP updates, and competitor intelligence.
  * Same flow as Sunday but with fewer sources.
  *
- * Flow: scan sources → classify → generate brief → post + store
+ * Flow: scan sources → classify → generate brief → post + store → assess impact (high-priority)
  */
 
-import { schedules } from "@trigger.dev/sdk/v3";
+import { schedules, wait } from "@trigger.dev/sdk/v3";
 import { wf26CieScanSource } from "./wf26-cie-scan-source.js";
 import { wf26CieClassifyItems } from "./wf26-cie-classify-items.js";
 import { wf26CieGenerateBrief } from "./wf26-cie-generate-brief.js";
 import { wf26CiePostSlack } from "./wf26-cie-post-slack.js";
 import { wf26CieStoreResults } from "./wf26-cie-store-results.js";
+import { wf26CieAssessImpact } from "./wf26-cie-assess-impact.js";
+import { query } from "../lib/db.js";
 import type { ScanResult } from "./wf26-cie-scan-source.js";
 
 const WEDNESDAY_SOURCES = [
@@ -127,6 +129,37 @@ export const wf26CieWednesdayScan = schedules.task({
       clientImpact: briefData.clientImpact,
       stats,
     });
+
+    // Step 5: Trigger impact assessment for high-priority items
+    const highPriorityItems = classifiedItems.filter(
+      (item) =>
+        item.urgency === "immediate" ||
+        (item.actionability === "high" && item.relevanceScore >= 8)
+    );
+
+    if (highPriorityItems.length > 0) {
+      // Wait briefly for store to persist items
+      await wait.for({ seconds: 5 });
+
+      // Look up stored intelligence IDs for high-priority items
+      for (const item of highPriorityItems) {
+        const idResult = await query(
+          `SELECT id FROM content_intelligence WHERE scan_date = $1 AND url = $2 LIMIT 1`,
+          [scanDate, item.url]
+        );
+        if (idResult.rows.length > 0) {
+          await wf26CieAssessImpact.trigger({
+            intelligenceId: idResult.rows[0].id,
+            title: item.title,
+            description: item.description,
+            category: item.category,
+            urgency: item.urgency,
+            actionability: item.actionability,
+            relevanceScore: item.relevanceScore,
+          });
+        }
+      }
+    }
 
     return {
       scanDate,
