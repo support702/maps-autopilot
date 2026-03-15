@@ -10,20 +10,20 @@ interface GuaranteeConfig {
   showPremiumFeatures?: boolean;
 }
 
-const tiers: Record<string, GuaranteeConfig> = {
-  A: {
+const tracks: Record<string, GuaranteeConfig> = {
+  guarantee: {
     icon: Shield,
     color: "#2ECC71",
     headline: "Top 3 in Google Maps in 90 Days — GUARANTEED",
     subtext: "If we don't hit it, we work up to 6 additional months at no extra cost.",
   },
-  B: {
+  aggressive: {
     icon: Target,
     color: "#0F9D9A",
     headline: "Measurable Improvement + 15 Tracked Calls/Mo by Day 90",
     subtext: "If we don't hit it, we work up to 6 additional months at no extra cost.",
   },
-  C: {
+  foundation: {
     icon: Rocket,
     color: "#F1C40F",
     headline: "90-Day Performance Checkpoint",
@@ -39,8 +39,8 @@ const premiumFeatures = [
   { icon: Globe, label: "Website audit" },
 ];
 
-export function Slide07Guarantee({ tier }: { tier: string }) {
-  const config = tiers[tier] || tiers.A;
+export function Slide07Guarantee({ track }: { track: string }) {
+  const config = tracks[track] || tracks.aggressive;
   const Icon = config.icon;
 
   return (

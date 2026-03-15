@@ -11,15 +11,16 @@
   "description": "",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",
-    "@trigger.dev/sdk": "^4.4.2",
+    "@trigger.dev/sdk": "^4.4.3",
     "axios": "^1.13.6",
+    "cheerio": "^1.2.0",
     "form-data": "^4.0.5",
     "nodemailer": "^8.0.1",
     "pg": "^8.20.0",
     "puppeteer": "^24.38.0"
   },
   "devDependencies": {
-    "@trigger.dev/build": "^4.4.2",
+    "@trigger.dev/build": "^4.4.3",
     "@types/nodemailer": "^7.0.11",
     "@types/pg": "^8.18.0",
     "trigger.dev": "^4.4.2",

@@ -100,17 +100,15 @@ export const wf26CieStoreResults = schemaTask({
     await query(
       `INSERT INTO content_briefs
          (scan_date, scan_type, brief, action_items, content_scripts,
-          client_impact, total_scanned, relevant_count, high_priority_count)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+          client_impact, stats)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
        ON CONFLICT (scan_date, scan_type)
        DO UPDATE SET
          brief = EXCLUDED.brief,
          action_items = EXCLUDED.action_items,
          content_scripts = EXCLUDED.content_scripts,
          client_impact = EXCLUDED.client_impact,
-         total_scanned = EXCLUDED.total_scanned,
-         relevant_count = EXCLUDED.relevant_count,
-         high_priority_count = EXCLUDED.high_priority_count`,
+         stats = EXCLUDED.stats`,
       [
         scanDate,
         scanType,
@@ -118,9 +116,7 @@ export const wf26CieStoreResults = schemaTask({
         JSON.stringify(actionItems),
         JSON.stringify(contentScripts),
         clientImpact,
-        stats.totalScanned,
-        stats.relevant,
-        stats.highPriority,
+        JSON.stringify(stats),
       ]
     );
 

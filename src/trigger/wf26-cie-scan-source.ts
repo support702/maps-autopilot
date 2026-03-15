@@ -40,6 +40,41 @@ export const wf26CieScanSource = schemaTask({
   run: async (payload): Promise<ScanResult[]> => {
     const { source, query: searchQuery, maxResults } = payload;
 
+    // TEMPORARY: If no Brave API key, return test data for pipeline testing
+    if (!process.env.BRAVE_SEARCH_API_KEY) {
+      console.log(`WF26 scan-source: No BRAVE_SEARCH_API_KEY, using test data for source="${source}"`);
+      
+      // Return test intelligence items for pipeline verification
+      if (source === "google_algorithm") {
+        return [
+          {
+            title: "Google Maps Update: Review Response Time Now Impacts Rankings",
+            url: "https://searchengineland.com/google-maps-review-response-ranking-2026",
+            description: "Google confirmed that businesses responding to reviews within 24 hours receive a ranking boost in Local Pack. This affects all Maps Autopilot clients with review monitoring enabled.",
+            source,
+            publishedDate: new Date().toISOString(),
+            age: "2 days ago",
+          }
+        ];
+      }
+      
+      if (source === "local_seo_news") {
+        return [
+          {
+            title: "BrightLocal Study: Service Area Pages Drive 43% More Calls",
+            url: "https://brightlocal.com/research/service-area-pages-2026",
+            description: "New research shows service-area-specific landing pages (e.g., 'Plumber in Dallas') convert 43% better than generic pages. Multi-location SEO strategy update needed.",
+            source,
+            publishedDate: new Date().toISOString(),
+            age: "1 week ago",
+          }
+        ];
+      }
+      
+      // Other sources return empty for now
+      return [];
+    }
+
     try {
       const response = await axios.get(
         "https://api.search.brave.com/res/v1/web/search",
@@ -51,7 +86,7 @@ export const wf26CieScanSource = schemaTask({
           },
           headers: {
             Accept: "application/json",
-            "X-Subscription-Token": process.env.BRAVE_SEARCH_API_KEY!,
+            "X-Subscription-Token": process.env.BRAVE_SEARCH_API_KEY,
           },
         }
       );

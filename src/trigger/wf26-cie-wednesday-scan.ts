@@ -21,17 +21,44 @@ import { query } from "../lib/db.js";
 import type { ScanResult } from "./wf26-cie-scan-source.js";
 
 const WEDNESDAY_SOURCES = [
+  // === REDDIT — SEO, SEARCH & AI DEBATES ===
   {
-    source: "google_algorithm",
-    query: "Google algorithm update local search ranking",
+    source: "reddit_seo",
+    query: "site:reddit.com/r/SEO local SEO Google Maps ranking algorithm",
   },
   {
-    source: "gbp_updates",
-    query: "Google Business Profile new features updates",
+    source: "reddit_localseo",
+    query: "site:reddit.com/r/localseo Google Business Profile reviews Maps Pack",
   },
   {
-    source: "competitor_intel",
-    query: "local SEO competitor analysis tools strategy",
+    source: "reddit_bigseo",
+    query: "site:reddit.com/r/bigseo local search algorithm AI Google changes",
+  },
+  {
+    source: "reddit_smallbusiness",
+    query: "site:reddit.com/r/smallbusiness SEO worth it Google reviews agency scam",
+  },
+  {
+    source: "reddit_entrepreneur",
+    query: "site:reddit.com/r/Entrepreneur SEO agency local business Google visibility",
+  },
+  {
+    source: "reddit_digital_marketing",
+    query: "site:reddit.com/r/digital_marketing local SEO agency results AI search",
+  },
+  // === SEO COMMUNITY FORUMS ===
+  {
+    source: "moz_community",
+    query: "site:moz.com/community local SEO Google Maps ranking reviews",
+  },
+  {
+    source: "warrior_forum",
+    query: "site:warriorforum.com local SEO agency Google Maps clients",
+  },
+  // === QUORA — BUSINESS OWNERS ASKING QUESTIONS ===
+  {
+    source: "quora_seo",
+    query: "site:quora.com local SEO worth it Google Maps AI search ChatGPT find business 2026",
   },
 ];
 

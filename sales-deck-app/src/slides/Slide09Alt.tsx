@@ -9,8 +9,8 @@ function parseNum(s: string): number {
 }
 
 export function Slide09Alt({ data }: { data: AuditData }) {
-  const lostMonthly = parseNum(data.lost_monthly);
-  const lostAnnual = parseNum(data.lost_annual);
+  const lostMonthly = parseNum(data.lost_monthly || data.opportunity_monthly || "0");
+  const lostAnnual = parseNum(data.lost_annual || data.opportunity_annual || "0");
   const monthlyPrice = parseNum(data.monthly_price);
   const setupFee = parseNum(data.setup_fee);
   const roiMultiple = Math.round(lostMonthly / monthlyPrice);

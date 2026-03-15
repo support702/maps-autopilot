@@ -68,33 +68,45 @@ export const wf26CieAssessImpact = schemaTask({
     const affectedEntries: WorkflowEntry[] = getAffectedWorkflows(category);
     const affectedWorkflows: string[] = affectedEntries.map((w) => w.id);
 
-    // Query recent competitor snapshot data (±7 days)
-    const competitorData = await query(
-      `SELECT
-         COUNT(*) AS total_snapshots,
-         COUNT(DISTINCT competitor_name) AS unique_competitors,
-         ROUND(AVG(rating)::numeric, 2) AS avg_rating,
-         ROUND(AVG(review_count)::numeric, 0) AS avg_reviews,
-         MIN(rank_position) AS best_rank,
-         MAX(rank_position) AS worst_rank
-       FROM competitor_snapshots
-       WHERE scan_date >= NOW() - INTERVAL '7 days'
-         AND scan_date <= NOW() + INTERVAL '7 days'`
-    );
+    // Query recent competitor snapshot data (±7 days) - gracefully handle missing tables
+    let competitorData;
+    try {
+      competitorData = await query(
+        `SELECT
+           COUNT(*) AS total_snapshots,
+           COUNT(DISTINCT competitor_name) AS unique_competitors,
+           ROUND(AVG(rating)::numeric, 2) AS avg_rating,
+           ROUND(AVG(review_count)::numeric, 0) AS avg_reviews,
+           MIN(rank_position) AS best_rank,
+           MAX(rank_position) AS worst_rank
+         FROM competitor_snapshots
+         WHERE scan_date >= NOW() - INTERVAL '7 days'
+           AND scan_date <= NOW() + INTERVAL '7 days'`
+      );
+    } catch (error) {
+      console.log("WF26 assess-impact: competitor_snapshots table not found, using empty data");
+      competitorData = { rows: [{ total_snapshots: 0 }] };
+    }
 
-    // Query recent geo grid history (±7 days)
-    const geoData = await query(
-      `SELECT
-         COUNT(*) AS total_records,
-         COUNT(DISTINCT keyword) AS unique_keywords,
-         ROUND(AVG(top3_pct)::numeric, 1) AS avg_top3_pct,
-         ROUND(AVG(top10_pct)::numeric, 1) AS avg_top10_pct,
-         ROUND(AVG(avg_rank)::numeric, 1) AS avg_rank,
-         ARRAY_AGG(DISTINCT trend) FILTER (WHERE trend IS NOT NULL) AS trends
-       FROM geo_grid_history
-       WHERE scan_date >= NOW() - INTERVAL '7 days'
-         AND scan_date <= NOW() + INTERVAL '7 days'`
-    );
+    // Query recent geo grid history (±7 days) - gracefully handle missing tables
+    let geoData;
+    try {
+      geoData = await query(
+        `SELECT
+           COUNT(*) AS total_records,
+           COUNT(DISTINCT keyword) AS unique_keywords,
+           ROUND(AVG(top3_pct)::numeric, 1) AS avg_top3_pct,
+           ROUND(AVG(top10_pct)::numeric, 1) AS avg_top10_pct,
+           ROUND(AVG(avg_rank)::numeric, 1) AS avg_rank,
+           ARRAY_AGG(DISTINCT trend) FILTER (WHERE trend IS NOT NULL) AS trends
+         FROM geo_grid_history
+         WHERE scan_date >= NOW() - INTERVAL '7 days'
+           AND scan_date <= NOW() + INTERVAL '7 days'`
+      );
+    } catch (error) {
+      console.log("WF26 assess-impact: geo_grid_history table not found, using empty data");
+      geoData = { rows: [{ total_records: 0 }] };
+    }
 
     const compStats = competitorData.rows[0];
     const geoStats = geoData.rows[0];

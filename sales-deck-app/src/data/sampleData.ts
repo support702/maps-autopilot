@@ -17,13 +17,19 @@ export interface AuditData {
   comp3_reviews: string;
   comp3_rating: string;
   review_gap: string;
-  missed_calls: string;
+  missed_calls?: string;
   avg_ticket: string;
-  lost_monthly: string;
-  lost_annual: string;
+  lost_monthly?: string;
+  lost_annual?: string;
+  top3_estimated_calls: string;
+  prospect_estimated_calls: string;
+  opportunity_gap_calls: string;
+  opportunity_monthly: string;
+  opportunity_annual: string;
   monthly_price: string;
   setup_fee: string;
   market_tier: string;
+  track?: string;
 }
 
 export const sampleData: AuditData = {
@@ -49,6 +55,11 @@ export const sampleData: AuditData = {
   avg_ticket: "450",
   lost_monthly: "15,750",
   lost_annual: "189,000",
+  top3_estimated_calls: "85",
+  prospect_estimated_calls: "25",
+  opportunity_gap_calls: "60",
+  opportunity_monthly: "27,000",
+  opportunity_annual: "324,000",
   monthly_price: "500",
   setup_fee: "1,500",
   market_tier: "A",

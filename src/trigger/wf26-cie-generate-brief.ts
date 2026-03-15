@@ -64,9 +64,24 @@ export const wf26CieGenerateBrief = schemaTask({
       )
       .join("\n\n");
 
+    const wednesdayAdditions = scanType === "wednesday" 
+      ? `
+
+For community-sourced content briefs, also include these fields for each content script:
+
+1. ORIGINAL_THREAD_QUOTE: A short paraphrase of what triggered this content idea (never quote directly — paraphrase the sentiment)
+2. THE_WRONG_BELIEF: What does the audience currently think that's incorrect or incomplete?
+3. THE_PIVOT: The moment in the video where you shift from validating their frustration to showing the truth
+4. PROOF_ELEMENT: What data, screen recording, or visual proof makes this undeniable?
+5. NURTURE_EMAIL_VERSION: A 3-sentence email version of this content for the GHL nurture sequence (Hook-Value-CTA format)
+6. CONTENT_CATEGORY: top_of_funnel (attract new audience) or mid_funnel (trust validation for ad-exposed prospects)
+
+These fields help turn Reddit/forum conversations into video content that also feeds your nurture email sequence.`
+      : '';
+
     const prompt = `You are the Chief Intelligence Officer for "Maps Autopilot", a local SEO agency that manages Google Business Profiles, reviews, citations, and local search visibility for service-area businesses (home services, dental, auto repair, etc.).
 
-SCAN TYPE: ${scanType} (${scanType === "sunday" ? "comprehensive weekly brief" : "mid-week update"})
+SCAN TYPE: ${scanType} (${scanType === "sunday" ? "comprehensive weekly brief" : "mid-week community scan"})
 ITEMS FOUND: ${classifiedItems.length}
 
 CLASSIFIED INTELLIGENCE:
@@ -83,11 +98,29 @@ Generate a complete intelligence brief with these sections:
    - Be based on a trending topic from the scan
    - Include a hook, 2-3 key points, and a CTA
    - Specify target platform (TikTok, Instagram Reels, LinkedIn, YouTube Shorts)
+${wednesdayAdditions}
 
 4. CLIENT IMPACT ASSESSMENT: How these trends affect current clients. Group by urgency (immediate action needed, monitor this week, informational).
 
 Return ONLY valid JSON. No markdown, no code fences.
-{
+${scanType === "wednesday" ? `{
+  "brief": "• Bullet 1\\n• Bullet 2\\n• Bullet 3",
+  "actionItems": ["Action 1", "Action 2"],
+  "contentScripts": [
+    {
+      "title": "Script Title",
+      "script": "Full 30-60 second script text",
+      "platform": "TikTok",
+      "originalThreadQuote": "Business owners on Reddit are saying...",
+      "wrongBelief": "They believe X",
+      "pivot": "But here's the truth...",
+      "proofElement": "Screen recording showing Y",
+      "nurtureEmailVersion": "Hook sentence. Value sentence. CTA sentence.",
+      "contentCategory": "top_of_funnel"
+    }
+  ],
+  "clientImpact": "Full impact assessment text"
+}` : `{
   "brief": "• Bullet 1\\n• Bullet 2\\n• Bullet 3",
   "actionItems": ["Action 1", "Action 2"],
   "contentScripts": [
@@ -98,7 +131,7 @@ Return ONLY valid JSON. No markdown, no code fences.
     }
   ],
   "clientImpact": "Full impact assessment text"
-}`;
+}`}`;
 
     const rawResponse = await callClaude(prompt, undefined, 4096);
 
