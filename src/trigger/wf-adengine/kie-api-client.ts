@@ -17,22 +17,22 @@ interface KieCreateTaskResponse {
   data: { taskId: string };
 }
 
-interface KieTaskOutput {
-  image_url?: string;
-  video_url?: string;
-  url?: string;
-}
-
 interface KieTaskData {
-  status?: string;
+  state?: string;
+  resultJson?: string;
   error?: string;
-  output?: KieTaskOutput;
 }
 
 interface KieTaskDetailsResponse {
   code: number;
   msg: string;
   data: KieTaskData;
+}
+
+interface KieParsedResult {
+  state?: string;
+  resultUrls?: string[];
+  error?: string;
 }
 
 /** Create a task on Kie.ai. Returns the taskId for polling. */
@@ -61,10 +61,10 @@ export async function createKieTask(params: KieCreateTaskParams): Promise<string
   return data.data.taskId;
 }
 
-/** Get current status/details of a Kie.ai task. */
+/** Get current status/details of a Kie.ai task via /jobs/recordInfo endpoint. */
 export async function getKieTaskStatus(taskId: string): Promise<KieTaskDetailsResponse> {
   const response = await fetch(
-    `${KIE_BASE_URL}/jobs/getTaskDetails?taskId=${taskId}`,
+    `${KIE_BASE_URL}/jobs/recordInfo?taskId=${taskId}`,
     {
       headers: { Authorization: `Bearer ${process.env.KIE_AI_API_KEY}` },
     }
@@ -84,20 +84,30 @@ export async function getKieTaskStatus(taskId: string): Promise<KieTaskDetailsRe
 export async function pollKieTask(
   taskId: string,
   options: { maxAttempts: number; intervalMs: number }
-): Promise<KieTaskData> {
+): Promise<KieParsedResult> {
   for (let i = 0; i < options.maxAttempts; i++) {
     const result = await getKieTaskStatus(taskId);
-    const status = result.data?.status;
+    const state = result.data?.state || "";
 
-    if (status === "completed" || status === "success") {
-      return result.data;
+    if (state.includes("success")) {
+      const parsed: KieParsedResult = { state };
+      if (result.data?.resultJson) {
+        try {
+          const resultData = JSON.parse(result.data.resultJson);
+          parsed.resultUrls = resultData.resultUrls;
+        } catch {
+          // resultJson wasn't valid JSON, leave resultUrls empty
+        }
+      }
+      return parsed;
     }
-    if (status === "failed") {
+    if (state.includes("fail")) {
       throw new Error(
-        `Kie.ai task ${taskId} failed: ${result.data?.error || "unknown error"}`
+        `Kie.ai task ${taskId} failed: ${result.data?.error || state}`
       );
     }
 
+    // In-progress states: waiting, queuing, generating — keep polling
     await new Promise((resolve) => setTimeout(resolve, options.intervalMs));
   }
 
@@ -130,7 +140,7 @@ export async function generateImage(params: {
   const taskId = await createKieTask({ model: "nano-banana-pro", input });
   const result = await pollKieTask(taskId, { maxAttempts: 24, intervalMs: 5000 });
 
-  const imageUrl = result.output?.image_url || result.output?.url || "";
+  const imageUrl = result.resultUrls?.[0] || "";
   if (!imageUrl) {
     throw new Error(`Kie.ai task ${taskId} completed but returned no image URL`);
   }
@@ -170,7 +180,7 @@ export async function generateVideo(params: {
 
   const result = await pollKieTask(taskId, { maxAttempts: 60, intervalMs: 10000 });
 
-  const videoUrl = result.output?.video_url || result.output?.url || "";
+  const videoUrl = result.resultUrls?.[0] || "";
   if (!videoUrl) {
     throw new Error(`Kie.ai task ${taskId} completed but returned no video URL`);
   }
