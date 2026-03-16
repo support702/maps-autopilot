@@ -40,7 +40,7 @@ export async function createKieTask(params: KieCreateTaskParams): Promise<string
   const response = await fetch(`${KIE_BASE_URL}/jobs/createTask`, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${process.env.KIE_API_KEY}`,
+      Authorization: `Bearer ${process.env.KIE_AI_API_KEY}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
@@ -66,7 +66,7 @@ export async function getKieTaskStatus(taskId: string): Promise<KieTaskDetailsRe
   const response = await fetch(
     `${KIE_BASE_URL}/jobs/getTaskDetails?taskId=${taskId}`,
     {
-      headers: { Authorization: `Bearer ${process.env.KIE_API_KEY}` },
+      headers: { Authorization: `Bearer ${process.env.KIE_AI_API_KEY}` },
     }
   );
 
