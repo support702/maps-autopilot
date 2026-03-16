@@ -91,9 +91,9 @@ export const generateSceneFrames = task({
       }
 
       results.push({
-        scene_number: scene.scene_number,
-        scene_name: scene.scene_name,
-        image_urls: sceneImageUrls,
+        sceneNumber: scene.scene_number,
+        sceneName: scene.scene_name,
+        imageUrls: sceneImageUrls,
       });
     }
 

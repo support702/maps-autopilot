@@ -79,9 +79,9 @@ export interface SlackMessageRecord {
 }
 
 export interface SceneFrameResult {
-  scene_number: number;
-  scene_name: string;
-  image_urls: string[];
+  sceneNumber: number;
+  sceneName: string;
+  imageUrls: string[];
 }
 
 export interface VideoClipResult {

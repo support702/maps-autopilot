@@ -6,7 +6,7 @@
 import { task } from "@trigger.dev/sdk/v3";
 import { callClaude } from "../../lib/anthropic.js";
 import { saveStoryboard, updateProjectStatus } from "./db.js";
-import type { AdConcept, Storyboard } from "./types.js";
+import type { AdConcept, Storyboard, StoryboardScene } from "./types.js";
 
 export const generateStoryboard = task({
   id: "ad-engine-generate-storyboard",
@@ -90,9 +90,9 @@ Aspect ratios: ${aspectRatios}`;
       jsonStr = jsonStr.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "");
     }
 
-    let storyboard: Storyboard;
+    let parsed: Record<string, unknown>;
     try {
-      storyboard = JSON.parse(jsonStr);
+      parsed = JSON.parse(jsonStr);
     } catch (parseError) {
       // Retry once with explicit JSON-only instruction appended
       const retryResponse = await callClaude(
@@ -103,14 +103,21 @@ Aspect ratios: ${aspectRatios}`;
       if (retryStr.startsWith("```")) {
         retryStr = retryStr.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "");
       }
-      storyboard = JSON.parse(retryStr);
+      parsed = JSON.parse(retryStr);
     }
+
+    // Map Claude's snake_case JSON to camelCase Storyboard interface
+    const storyboard: Storyboard = {
+      scenes: parsed.scenes as StoryboardScene[],
+      anchorPrompts: (parsed.anchor_prompts || parsed.anchorPrompts) as string[],
+      suggestedScript: (parsed.suggested_script || parsed.suggestedScript) as string | undefined,
+    };
 
     // Validate required fields
     if (!storyboard.scenes || storyboard.scenes.length === 0) {
       throw new Error("Storyboard has no scenes");
     }
-    if (!storyboard.anchor_prompts || storyboard.anchor_prompts.length === 0) {
+    if (!storyboard.anchorPrompts || storyboard.anchorPrompts.length === 0) {
       throw new Error("Storyboard has no anchor prompts");
     }
 
