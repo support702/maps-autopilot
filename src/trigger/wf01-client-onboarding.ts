@@ -35,10 +35,12 @@ export const wf01ClientOnboarding = task({
       (payload["Website URL"] as string) ||
       (payload.business_website as string) ||
       "";
-    const yearsInBusiness =
+    const yearsInBusinessRaw =
       (payload["Years in Business"] as string) ||
       (payload.years_in_business as string) ||
       "0";
+    // Parse years: "5+" → 5, "3-5" → 5, "10" → 10
+    const yearsInBusiness = parseInt(yearsInBusinessRaw.replace(/[^\d]/g, "").slice(0, 2) || "0", 10);
     const primaryServices =
       (payload["Primary Services"] as string) ||
       (payload.primary_services as string) ||
