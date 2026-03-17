@@ -30,6 +30,19 @@ export interface AuditData {
   setup_fee: string;
   market_tier: string;
   track?: string;
+  keywordGap?: {
+    score: number;
+    total: number;
+    visible: number;
+    missing: number;
+    dominantCompetitor: string;
+    dominantCompetitorKeywords: number;
+    keywords: Array<{
+      keyword: string;
+      visible: boolean;
+      rank: number | null;
+    }>;
+  };
 }
 
 export const sampleData: AuditData = {
@@ -63,4 +76,22 @@ export const sampleData: AuditData = {
   monthly_price: "500",
   setup_fee: "1,500",
   market_tier: "A",
+  keywordGap: {
+    score: 38,
+    total: 8,
+    visible: 3,
+    missing: 5,
+    dominantCompetitor: "Dallas Dent Repair",
+    dominantCompetitorKeywords: 7,
+    keywords: [
+      { keyword: "hail damage repair", visible: true, rank: 5 },
+      { keyword: "paintless dent removal", visible: true, rank: 8 },
+      { keyword: "auto hail repair", visible: true, rank: 6 },
+      { keyword: "dent repair near me", visible: false, rank: null },
+      { keyword: "hail damage car", visible: false, rank: null },
+      { keyword: "PDR service", visible: false, rank: null },
+      { keyword: "insurance hail claim repair", visible: false, rank: null },
+      { keyword: "mobile dent repair", visible: false, rank: null },
+    ],
+  },
 };

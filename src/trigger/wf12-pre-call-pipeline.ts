@@ -519,6 +519,115 @@ function generateRepTalkingPoints(track: TrackInfo, projection: Projection): str
 }
 
 // ---------------------------------------------------------------------------
+// NEW: Keyword Gap Analysis
+// ---------------------------------------------------------------------------
+
+interface KeywordVisibility {
+  keyword: string;
+  prospectVisible: boolean;
+  prospectRank: number | null;
+  dominantCompetitor: string | null;
+  dominantCompetitorRank: number | null;
+}
+
+interface KeywordGapResult {
+  keywords: KeywordVisibility[];
+  gapScore: number; // 0-100 (100 = visible for all keywords)
+  totalKeywords: number;
+  visibleCount: number;
+  missingCount: number;
+  dominantCompetitorName: string;
+  dominantCompetitorKeywordCount: number;
+}
+
+async function checkKeywordVisibility(
+  keyword: string,
+  city: string,
+  state: string,
+  prospectPlaceId: string | null
+): Promise<KeywordVisibility> {
+  try {
+    const searchQuery = `${keyword} in ${city} ${state}`;
+    const url = `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${encodeURIComponent(searchQuery)}&key=${process.env.GOOGLE_API_KEY}`;
+    const { data } = await axios.get(url, { timeout: 10000 });
+
+    const results: Array<{ place_id: string; name: string }> = data.results || [];
+
+    // Check if prospect appears in results
+    let prospectVisible = false;
+    let prospectRank: number | null = null;
+    if (prospectPlaceId) {
+      const idx = results.findIndex((r) => r.place_id === prospectPlaceId);
+      if (idx !== -1) {
+        prospectVisible = true;
+        prospectRank = idx + 1;
+      }
+    }
+
+    // Find the top competitor (first result that isn't the prospect)
+    const topResult = results.find((r) => r.place_id !== prospectPlaceId);
+
+    return {
+      keyword,
+      prospectVisible,
+      prospectRank,
+      dominantCompetitor: topResult?.name || null,
+      dominantCompetitorRank: topResult ? 1 : null,
+    };
+  } catch (err) {
+    console.error(`[WF12] Keyword visibility check failed for "${keyword}":`, err);
+    return {
+      keyword,
+      prospectVisible: false,
+      prospectRank: null,
+      dominantCompetitor: null,
+      dominantCompetitorRank: null,
+    };
+  }
+}
+
+async function runKeywordGapAnalysis(
+  keywords: string[],
+  city: string,
+  state: string,
+  prospectPlaceId: string | null
+): Promise<KeywordGapResult> {
+  // Check each keyword (run sequentially to avoid rate limits)
+  const results: KeywordVisibility[] = [];
+  for (const keyword of keywords) {
+    const result = await checkKeywordVisibility(keyword, city, state, prospectPlaceId);
+    results.push(result);
+    // Small delay to avoid rate limiting
+    await new Promise((r) => setTimeout(r, 500));
+  }
+
+  const visibleCount = results.filter((r) => r.prospectVisible).length;
+  const missingCount = results.length - visibleCount;
+  const gapScore = results.length > 0 ? Math.round((visibleCount / results.length) * 100) : 0;
+
+  // Find the most dominant competitor (appears most often as #1)
+  const competitorCounts: Record<string, number> = {};
+  for (const r of results) {
+    if (r.dominantCompetitor) {
+      competitorCounts[r.dominantCompetitor] = (competitorCounts[r.dominantCompetitor] || 0) + 1;
+    }
+  }
+  const sortedCompetitors = Object.entries(competitorCounts).sort((a, b) => b[1] - a[1]);
+  const dominantCompetitorName = sortedCompetitors[0]?.[0] || "Unknown";
+  const dominantCompetitorKeywordCount = sortedCompetitors[0]?.[1] || 0;
+
+  return {
+    keywords: results,
+    gapScore,
+    totalKeywords: results.length,
+    visibleCount,
+    missingCount,
+    dominantCompetitorName,
+    dominantCompetitorKeywordCount,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Task
 // ---------------------------------------------------------------------------
 
@@ -745,6 +854,32 @@ export const wf12PreCallPipeline = task({
     );
 
     // ------------------------------------------------------------------
+    // Step 3.5: Keyword Gap Analysis
+    // ------------------------------------------------------------------
+
+    let keywordGapResult: KeywordGapResult | null = null;
+
+    try {
+      // Load high_ticket_keywords from niche_configs
+      const highTicketKeywords: string[] = nicheConfig?.high_ticket_keywords || [];
+
+      if (highTicketKeywords.length > 0) {
+        console.log(`[WF12] Running keyword gap analysis for ${highTicketKeywords.length} keywords`);
+        keywordGapResult = await runKeywordGapAnalysis(
+          highTicketKeywords,
+          city,
+          state,
+          prospectPlace?.place_id || null
+        );
+        console.log(`[WF12] Keyword gap score: ${keywordGapResult.gapScore}/100 (${keywordGapResult.visibleCount}/${keywordGapResult.totalKeywords} visible)`);
+      } else {
+        console.log("[WF12] No high_ticket_keywords configured for niche, skipping keyword gap analysis");
+      }
+    } catch (err) {
+      console.error("[WF12] Keyword gap analysis failed (non-critical):", err);
+    }
+
+    // ------------------------------------------------------------------
     // Step 4: Revenue math
     // ------------------------------------------------------------------
 
@@ -802,8 +937,10 @@ export const wf12PreCallPipeline = task({
           assigned_track, projection_data, rep_talking_points,
           review_gap_to_position3, top3_avg_reviews,
           chain_dominance_detected,
+          keyword_gap_data, keyword_gap_score,
+          dominant_competitor_name, dominant_competitor_keyword_count,
           created_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, NOW())`,
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, NOW())`,
         [
           business_name,
           city,
@@ -830,6 +967,10 @@ export const wf12PreCallPipeline = task({
               "valvoline",
             ].some((chain) => c.name.toLowerCase().includes(chain))
           ),
+          keywordGapResult ? JSON.stringify(keywordGapResult) : null,
+          keywordGapResult ? `${keywordGapResult.visibleCount}/${keywordGapResult.totalKeywords}` : null,
+          keywordGapResult?.dominantCompetitor || null,
+          keywordGapResult?.dominantCompetitorKeywordCount || null,
         ]
       );
     } catch (err) {
@@ -865,6 +1006,20 @@ export const wf12PreCallPipeline = task({
       monthly_price: String(monthlyPrice),
       setup_fee: String(setupFee),
       market_tier: tier,
+      track: track.label,
+      keywordGap: keywordGapResult ? {
+        score: keywordGapResult.gapScore,
+        total: keywordGapResult.totalKeywords,
+        visible: keywordGapResult.visibleCount,
+        missing: keywordGapResult.totalKeywords - keywordGapResult.visibleCount,
+        dominantCompetitor: keywordGapResult.dominantCompetitor || 'Unknown',
+        dominantCompetitorKeywords: keywordGapResult.dominantCompetitorKeywordCount || 0,
+        keywords: keywordGapResult.keywords.map(k => ({
+          keyword: k.keyword,
+          visible: k.visibleInTop3,
+          rank: k.prospectRank
+        }))
+      } : undefined,
     };
 
     // Step 7: Upload audit JSON to VPS via HTTP
@@ -1146,7 +1301,7 @@ export const wf12PreCallPipeline = task({
     </tr>
     <tr style="background: #f0f0f5;">
       <td style="padding: 8px; border: 1px solid #ddd;"><strong>Guarantee</strong></td>
-      <td style="padding: 8px; border: 1px solid #ddd;">${GUARANTEE_TEXT[tier]}</td>
+      <td style="padding: 8px; border: 1px solid #ddd;">${GUARANTEE_TEXT[track.label]}</td>
     </tr>
   </table>
 

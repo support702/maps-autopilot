@@ -7,6 +7,7 @@ import { ProgressBar } from "../components/ProgressBar";
 import { Slide01Hook } from "../slides/Slide01Hook";
 import { Slide02MapsPack } from "../slides/Slide02MapsPack";
 import { Slide03MoneyMath } from "../slides/Slide03MoneyMath";
+import { Slide03BKeywordGap } from "../slides/Slide03BKeywordGap";
 import { Slide04Phase1 } from "../slides/Slide04Phase1";
 import { Slide05Phase2 } from "../slides/Slide05Phase2";
 import { Slide06Proof } from "../slides/Slide06Proof";
@@ -17,7 +18,7 @@ import { Slide09B } from "../slides/Slide09B";
 import { Slide10NextDays } from "../slides/Slide10NextDays";
 import { Slide11End } from "../slides/Slide11End";
 
-const TOTAL_SLIDES = 12;
+const TOTAL_SLIDES = 13;
 
 export function DeckPage() {
   const { auditId } = useParams();
@@ -38,7 +39,7 @@ export function DeckPage() {
       .finally(() => setLoading(false));
   }, [auditId]);
 
-  const tier = searchParams.get("tier") || data.market_tier;
+  const track = searchParams.get("track") || data.track || "aggressive";
 
   const [currentSlide, setCurrentSlide] = useState(0);
 
@@ -69,15 +70,16 @@ export function DeckPage() {
       case 0: return <Slide01Hook data={data} />;
       case 1: return <Slide02MapsPack data={data} />;
       case 2: return <Slide03MoneyMath data={data} />;
-      case 3: return <Slide04Phase1 />;
-      case 4: return <Slide05Phase2 />;
-      case 5: return <Slide06Proof data={data} />;
-      case 6: return <Slide07Guarantee tier={tier} />;
-      case 7: return <Slide08Territory data={data} />;
-      case 8: return <Slide09A data={data} />;
-      case 9: return <Slide09B data={data} />;
-      case 10: return <Slide10NextDays />;
-      case 11: return <Slide11End data={data} />;
+      case 3: return <Slide03BKeywordGap data={data} />;
+      case 4: return <Slide04Phase1 />;
+      case 5: return <Slide05Phase2 />;
+      case 6: return <Slide06Proof data={data} />;
+      case 7: return <Slide07Guarantee track={track} />;
+      case 8: return <Slide08Territory data={data} />;
+      case 9: return <Slide09A data={data} />;
+      case 10: return <Slide09B data={data} />;
+      case 11: return <Slide10NextDays />;
+      case 12: return <Slide11End data={data} />;
       default: return <Slide01Hook data={data} />;
     }
   }
