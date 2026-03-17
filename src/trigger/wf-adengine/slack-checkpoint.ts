@@ -3,11 +3,37 @@
  * Handles posting to Slack and processing reactions for human checkpoints
  */
 
-import { runs } from "@trigger.dev/sdk";
 import { query } from "../../lib/db.js";
 
 const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN;
 const SLACK_CHANNEL = process.env.SLACK_CHANNEL_AD_ENGINE || "#ad-engine";
+const TRIGGER_API_URL = "https://api.trigger.dev";
+
+/**
+ * Complete a Trigger.dev wait token via REST API
+ * The SDK's `runs` object does not expose completeWaitForToken —
+ * use the HTTP endpoint instead.
+ */
+async function completeWaitToken(token: string, data: Record<string, unknown>): Promise<void> {
+  const secretKey = process.env.TRIGGER_SECRET_KEY;
+  if (!secretKey) {
+    throw new Error("TRIGGER_SECRET_KEY not set — cannot complete wait token");
+  }
+
+  const response = await fetch(`${TRIGGER_API_URL}/api/v1/wait-tokens/${encodeURIComponent(token)}/complete`, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${secretKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ data }),
+  });
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Failed to complete wait token "${token}": ${response.status} ${body}`);
+  }
+}
 
 interface SlackMessageOptions {
   projectId: string;
@@ -226,37 +252,33 @@ export async function handleSlackReaction(event: {
     const checkpointType = slackMessage.checkpoint_type;
     const projectId = slackMessage.project_id;
 
-    // Complete the appropriate wait token
+    // Complete the appropriate wait token via REST API
     if (checkpointType === "anchor_review") {
       const asset = await getAssetById(slackMessage.asset_id);
-      await runs.completeWaitForToken({
-        token: `anchor-approval-${projectId}`,
-        data: { approvedImageUrl: asset.asset_url },
+      await completeWaitToken(`anchor-approval-${projectId}`, {
+        approvedImageUrl: asset.asset_url,
       });
     } else if (checkpointType === "scene_review") {
       // Check if all scenes are approved
       const allApproved = await checkAllScenesApproved(projectId);
       if (allApproved) {
         const approvedUrls = await getApprovedSceneUrls(projectId);
-        await runs.completeWaitForToken({
-          token: `scenes-approval-${projectId}`,
-          data: { approvedSceneUrls: approvedUrls },
+        await completeWaitToken(`scenes-approval-${projectId}`, {
+          approvedSceneUrls: approvedUrls,
         });
       }
     } else if (checkpointType === "video_review") {
       const allApproved = await checkAllVideosApproved(projectId);
       if (allApproved) {
         const approvedUrls = await getApprovedClipUrls(projectId);
-        await runs.completeWaitForToken({
-          token: `videos-approval-${projectId}`,
-          data: { approvedClipUrls: approvedUrls },
+        await completeWaitToken(`videos-approval-${projectId}`, {
+          approvedClipUrls: approvedUrls,
         });
       }
     } else if (checkpointType === "voiceover_review") {
       const asset = await getAssetById(slackMessage.asset_id);
-      await runs.completeWaitForToken({
-        token: `voiceover-approval-${projectId}`,
-        data: { approvedUrl: asset.asset_url },
+      await completeWaitToken(`voiceover-approval-${projectId}`, {
+        approvedUrl: asset.asset_url,
       });
     }
 
