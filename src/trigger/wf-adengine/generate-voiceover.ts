@@ -107,21 +107,52 @@ function getVoiceSettings(variation: number) {
 }
 
 /**
- * Save audio to /tmp/ directory and return the file path.
- * In production, replace with S3/Supabase Storage upload.
+ * Upload audio to Slack via files.upload API and return the file URL.
+ * Uses Slack as lightweight storage so voiceovers are accessible without S3.
  */
 async function uploadAudioToStorage(
   audioBuffer: ArrayBuffer,
   filename: string
 ): Promise<string> {
-  const fs = await import("fs/promises");
-  const path = await import("path");
+  const slackToken = process.env.SLACK_BOT_TOKEN;
+  const slackChannel = process.env.SLACK_CHANNEL_AD_ENGINE || "#ad-engine";
 
-  const tmpDir = path.join("/tmp", "ad-engine-voiceovers");
-  await fs.mkdir(tmpDir, { recursive: true });
+  if (!slackToken) {
+    throw new Error("SLACK_BOT_TOKEN not set — cannot upload voiceover audio");
+  }
 
-  const filePath = path.join(tmpDir, filename);
-  await fs.writeFile(filePath, Buffer.from(audioBuffer));
+  const FormData = (await import("form-data")).default;
+  const form = new FormData();
+  form.append("file", Buffer.from(audioBuffer), {
+    filename,
+    contentType: "audio/mpeg",
+  });
+  form.append("channels", slackChannel);
+  form.append("title", filename);
+  form.append("initial_comment", `Voiceover: ${filename}`);
 
-  return filePath;
+  const response = await fetch("https://slack.com/api/files.upload", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${slackToken}`,
+      ...form.getHeaders(),
+    },
+    body: form as unknown as BodyInit,
+  });
+
+  if (!response.ok) {
+    throw new Error(`Slack files.upload HTTP error: ${response.status}`);
+  }
+
+  const result = (await response.json()) as {
+    ok: boolean;
+    error?: string;
+    file?: { url_private_download?: string; url_private?: string };
+  };
+
+  if (!result.ok) {
+    throw new Error(`Slack files.upload error: ${result.error}`);
+  }
+
+  return result.file?.url_private_download || result.file?.url_private || "";
 }
