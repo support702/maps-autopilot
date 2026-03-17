@@ -1016,7 +1016,7 @@ export const wf12PreCallPipeline = task({
         dominantCompetitorKeywords: keywordGapResult.dominantCompetitorKeywordCount || 0,
         keywords: keywordGapResult.keywords.map(k => ({
           keyword: k.keyword,
-          visible: k.visibleInTop3,
+          visible: k.prospectVisible,
           rank: k.prospectRank
         }))
       } : undefined,
