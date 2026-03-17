@@ -3,7 +3,7 @@
 // Called by the ad-engine orchestrator via triggerAndWait().unwrap().
 // Uses Claude API for creative direction; saves storyboard to ad_engine_projects via db.ts.
 
-import { task } from "@trigger.dev/sdk/v3";
+import { task } from "@trigger.dev/sdk";
 import { callClaude } from "../../lib/anthropic.js";
 import { saveStoryboard, updateProjectStatus } from "./db.js";
 import type { AdConcept, Storyboard, StoryboardScene } from "./types.js";

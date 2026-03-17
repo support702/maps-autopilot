@@ -3,7 +3,7 @@
 // Called by the ad-engine orchestrator via triggerAndWait().unwrap().
 // Each generated image is saved as an asset in ad_engine_assets via db.ts.
 
-import { task } from "@trigger.dev/sdk/v3";
+import { task } from "@trigger.dev/sdk";
 import { generateImage } from "./kie-api-client.js";
 import { saveAsset, updateProjectStatus } from "./db.js";
 

@@ -4,7 +4,7 @@
 // Called by the ad-engine orchestrator via triggerAndWait().unwrap().
 // Uses Claude to generate prompt variations; saves each frame to ad_engine_assets via db.ts.
 
-import { task } from "@trigger.dev/sdk/v3";
+import { task } from "@trigger.dev/sdk";
 import { callClaude } from "../../lib/anthropic.js";
 import { generateImage } from "./kie-api-client.js";
 import { saveAsset, updateProjectStatus } from "./db.js";

@@ -39,7 +39,7 @@ export const generateVoiceover = task({
           {
             method: "POST",
             headers: {
-              "Authorization": `Bearer ${apiKey}`,
+              "xi-api-key": apiKey,
               "Content-Type": "application/json",
             },
             body: JSON.stringify({
@@ -67,13 +67,13 @@ export const generateVoiceover = task({
 
         // Save to database
         await saveAsset({
-          projectId: payload.projectId,
+          project_id: payload.projectId,
           phase: "voiceover",
-          variationNumber: variation,
-          assetType: "audio",
-          assetUrl: audioUrl,
-          promptUsed: payload.script,
-          modelUsed: "elevenlabs",
+          variation_number: variation,
+          asset_type: "audio",
+          asset_url: audioUrl,
+          prompt_used: payload.script,
+          model_used: "elevenlabs",
         });
       } catch (error) {
         console.error(`Failed to generate voiceover variation ${variation}:`, error);
@@ -107,24 +107,21 @@ function getVoiceSettings(variation: number) {
 }
 
 /**
- * Upload audio to storage
- * TODO: Implement based on your storage solution (S3, Supabase Storage, etc.)
+ * Save audio to /tmp/ directory and return the file path.
+ * In production, replace with S3/Supabase Storage upload.
  */
 async function uploadAudioToStorage(
   audioBuffer: ArrayBuffer,
   filename: string
 ): Promise<string> {
-  // Placeholder - implement based on your storage solution
-  // For now, return a mock URL
-  // In production, upload to S3, Supabase Storage, or similar
-  
-  // Example with Supabase Storage:
-  // const { data, error } = await supabase.storage
-  //   .from('ad-engine-assets')
-  //   .upload(filename, audioBuffer, { contentType: 'audio/mpeg' });
-  // if (error) throw error;
-  // return supabase.storage.from('ad-engine-assets').getPublicUrl(filename).data.publicUrl;
+  const fs = await import("fs/promises");
+  const path = await import("path");
 
-  console.warn("Audio storage not implemented - returning placeholder URL");
-  return `https://storage.example.com/voiceovers/${filename}`;
+  const tmpDir = path.join("/tmp", "ad-engine-voiceovers");
+  await fs.mkdir(tmpDir, { recursive: true });
+
+  const filePath = path.join(tmpDir, filename);
+  await fs.writeFile(filePath, Buffer.from(audioBuffer));
+
+  return filePath;
 }

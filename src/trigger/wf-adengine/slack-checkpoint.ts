@@ -22,6 +22,7 @@ interface SlackImageOptions extends SlackMessageOptions {
 
 interface SlackVideoOptions extends SlackMessageOptions {
   videos: string[];
+  assetIds: string[];
 }
 
 /**
@@ -129,7 +130,8 @@ export async function postImagesToSlack(options: SlackImageOptions): Promise<voi
 }
 
 /**
- * Post videos to Slack with reaction prompts
+ * Post videos to Slack — each video as a SEPARATE message for individual reactions.
+ * Each message is linked to its specific asset_id in ad_engine_slack_messages.
  */
 export async function postVideosToSlack(options: SlackVideoOptions): Promise<void> {
   if (!SLACK_BOT_TOKEN) {
@@ -137,29 +139,10 @@ export async function postVideosToSlack(options: SlackVideoOptions): Promise<voi
     return;
   }
 
-  // Post message with video links
-  const blocks = [
-    {
-      type: "section",
-      text: {
-        type: "mrkdwn",
-        text: options.message,
-      },
-    },
-  ];
+  const totalVideos = options.videos.length;
 
-  // Add video links
-  for (let i = 0; i < options.videos.length; i++) {
-    blocks.push({
-      type: "section",
-      text: {
-        type: "mrkdwn",
-        text: `*Option ${i + 1}:* ${options.videos[i]}`,
-      },
-    });
-  }
-
-  const response = await fetch("https://slack.com/api/chat.postMessage", {
+  // Post header message first
+  await fetch("https://slack.com/api/chat.postMessage", {
     method: "POST",
     headers: {
       "Authorization": `Bearer ${SLACK_BOT_TOKEN}`,
@@ -168,23 +151,44 @@ export async function postVideosToSlack(options: SlackVideoOptions): Promise<voi
     body: JSON.stringify({
       channel: SLACK_CHANNEL,
       text: options.message,
-      blocks,
+      mrkdwn: true,
     }),
   });
 
-  const data = await response.json();
-  if (!data.ok) {
-    throw new Error(`Slack API error: ${data.error}`);
-  }
+  // Post each video as a separate message so each can be individually reacted to
+  for (let i = 0; i < totalVideos; i++) {
+    const videoUrl = options.videos[i];
+    const assetId = options.assetIds[i];
+    const label = `Option ${i + 1} of ${totalVideos}`;
 
-  // Save Slack message reference
-  if (options.checkpointType) {
-    await saveSlackMessage({
-      projectId: options.projectId,
-      slackMessageTs: data.ts,
-      checkpointType: options.checkpointType,
-      sceneNumber: options.sceneNumber,
+    const response = await fetch("https://slack.com/api/chat.postMessage", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${SLACK_BOT_TOKEN}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        channel: SLACK_CHANNEL,
+        text: `*${label}*${options.sceneNumber ? ` — Scene ${options.sceneNumber}` : ""}: ${videoUrl}`,
+        mrkdwn: true,
+      }),
     });
+
+    const data = await response.json();
+    if (!data.ok) {
+      throw new Error(`Slack API error posting video ${i + 1}: ${data.error}`);
+    }
+
+    // Save each message with its specific asset_id
+    if (options.checkpointType) {
+      await saveSlackMessage({
+        projectId: options.projectId,
+        slackMessageTs: data.ts,
+        checkpointType: options.checkpointType,
+        sceneNumber: options.sceneNumber,
+        assetId,
+      });
+    }
   }
 }
 

@@ -40,6 +40,7 @@ const AdConceptSchema = z.object({
 export const adEngineOrchestrator = schemaTask({
   id: "ad-engine-orchestrator",
   schema: AdConceptSchema,
+  maxDuration: 86400, // 24 hours — allows time for human approvals
   retry: {
     maxAttempts: 2,
     factor: 2,
@@ -148,7 +149,9 @@ export const adEngineOrchestrator = schemaTask({
     }
 
     // ★ HUMAN CHECKPOINT 2: Poll DB until all scenes are approved
-    const totalScenes = storyboard.scenes.length;
+    // Scene 1 is the anchor (phase="anchor"), not a scene frame.
+    // Only scenes 2+ are generated as phase="scene", so expect (total - 1) approvals.
+    const totalScenes = storyboard.scenes.length - 1;
     let approvedSceneUrls: Record<number, string> = {};
     while (true) {
       const approved = await getApprovedAssets(projectId, "scene");
@@ -190,6 +193,7 @@ export const adEngineOrchestrator = schemaTask({
       await postVideosToSlack({
         projectId,
         videos: clip.videoUrls,
+        assetIds: clip.assetIds,
         message: `🎬 *${payload.project_name}* — Scene ${clip.sceneNumber} Animation\nPick your favorite. React ✅. You only need 2-3 good seconds from each.`,
         checkpointType: "video_review",
         sceneNumber: clip.sceneNumber,

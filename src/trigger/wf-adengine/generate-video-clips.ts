@@ -34,6 +34,7 @@ export const generateVideoClips = task({
       sceneNumber: number;
       sceneName: string;
       videoUrls: string[];
+      assetIds: string[];
     }> = [];
 
     for (const scene of payload.scenes) {
@@ -41,6 +42,7 @@ export const generateVideoClips = task({
       if (!frameUrl) continue;
 
       const videoUrls: string[] = [];
+      const assetIds: string[] = [];
 
       // Generate 2 variations per scene
       for (let variation = 1; variation <= 2; variation++) {
@@ -48,7 +50,7 @@ export const generateVideoClips = task({
         const animationPrompt = generateAnimationPrompt(scene, variation);
 
         try {
-          const videoUrl = await generateVideo({
+          const result = await generateVideo({
             prompt: animationPrompt,
             startFrameUrl: frameUrl,
             duration: String(Math.min(scene.duration_seconds, 5)), // Max 5s per clip
@@ -57,19 +59,21 @@ export const generateVideoClips = task({
             sound: false, // We add voiceover separately
           });
 
-          videoUrls.push(videoUrl);
+          videoUrls.push(result.videoUrl);
 
           // Save to database
-          await saveAsset({
-            projectId: payload.projectId,
+          const assetId = await saveAsset({
+            project_id: payload.projectId,
             phase: "video",
-            sceneNumber: scene.scene_number,
-            variationNumber: variation,
-            assetType: "video",
-            assetUrl: videoUrl,
-            promptUsed: animationPrompt,
-            modelUsed: "kling-3.0",
+            scene_number: scene.scene_number,
+            variation_number: variation,
+            asset_type: "video",
+            asset_url: result.videoUrl,
+            prompt_used: animationPrompt,
+            model_used: "kling-3.0",
+            kie_task_id: result.taskId,
           });
+          assetIds.push(assetId);
         } catch (error) {
           console.error(
             `Failed to generate video for scene ${scene.scene_number}, variation ${variation}:`,
@@ -83,6 +87,7 @@ export const generateVideoClips = task({
         sceneNumber: scene.scene_number,
         sceneName: scene.scene_name,
         videoUrls,
+        assetIds,
       });
     }
 
