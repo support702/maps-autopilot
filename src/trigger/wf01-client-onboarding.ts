@@ -375,7 +375,7 @@ Output as JSON array: [{"title": "", "description": "", "category": ""}]`;
 
     try {
       await sendEmail(
-        "henry@mapsautopilot.com",
+        "henry@autobodyaccelerator.com",
         `New Client Setup: ${businessName} — ${clientId}`,
         emailHtml
       );
