@@ -200,12 +200,14 @@ export const wf01ClientOnboarding = task({
     );
     const audit = auditRows[0];
 
-    // 4. Agent 1 — SEO Strategist
+    // 4. Consolidated SEO + GBP Strategy Call (single Claude call)
     const seoPrompt = `You are an expert local SEO strategist specializing in ${niche.niche_name || nicheKey} businesses.
 
 CLIENT DATA:
 - Business: ${businessName}
-- Location: ${address}, Service area: ${serviceArea}
+- Location: ${enrichedAddress}, Service area: ${serviceArea}
+- City: ${enrichedCity}, State: ${enrichedState}
+- Phone: ${phone}
 - Services: ${primaryServices}
 - Years in business: ${yearsInBusiness}
 - USP: ${usp}
@@ -214,17 +216,22 @@ NICHE CONTEXT:
 - GBP Primary Category: ${niche.gbp_primary_category || ""}
 - Secondary Categories: ${JSON.stringify(niche.gbp_secondary_categories || [])}
 - Common search terms: ${JSON.stringify(niche.industry_terms || {})}
+- Niche GBP Products templates: ${JSON.stringify(niche.gbp_products || [])}
 
 AUDIT DATA (if available): ${audit ? JSON.stringify(audit.top_competitors) : "none"}
 Market Level: ${audit?.market_competition_level || "unknown"}
 
-TASK:
-1. Recommend optimal PRIMARY GBP category
-2. Recommend 3-5 SECONDARY categories based on actual services
-3. Generate top 10 target keywords (service + city combinations)
-4. Rank keywords by estimated impact (high/medium/low)
-5. Suggest 10 Q&A topics for GBP seeding
-6. Recommend primary guarantee keyword (most winnable high-volume term)
+TASK — Return ALL of the following in a single JSON response:
+
+1. PRIMARY GBP CATEGORY — optimal category for this business
+2. SECONDARY CATEGORIES — 3-5 based on actual services
+3. TARGET KEYWORDS — top 10 (service + city combinations), ranked by impact
+4. Q&A TOPICS — 10 topics for GBP seeding
+5. GUARANTEE KEYWORD — most winnable high-volume term
+6. BUSINESS DESCRIPTION (750 chars max) — factual GBP description mentioning services, location, years in business. No sales fluff. Include phone number. Must be under 750 characters.
+7. GBP PRODUCTS — EXACTLY 12 products. Each description MUST be close to 1000 characters. Structure: what the service is → common problems it solves → how this business delivers it → full CTA with business name, address, phone. Factual and specific, NOT sales copy. Include service + city keywords naturally.
+8. GBP SERVICES — 8-15 services with name and a one-liner description
+9. PHOTO FILENAMES — 6 keyword-rich filename templates like "brake-repair-[city]-[business].jpg"
 
 Output as JSON:
 {
@@ -232,10 +239,14 @@ Output as JSON:
   "secondary_categories": [],
   "target_keywords": [{"keyword": "", "intent": "", "impact": ""}],
   "qa_topics": [{"question": "", "answer_outline": ""}],
-  "guarantee_keyword": ""
+  "guarantee_keyword": "",
+  "business_description_750": "",
+  "gbp_products": [{"title": "", "description": "", "category": ""}],
+  "gbp_services": [{"name": "", "one_liner": ""}],
+  "photo_filenames": []
 }`;
 
-    const seoStrategyRaw = await callClaude(seoPrompt, undefined, 2000);
+    const seoStrategyRaw = await callClaude(seoPrompt, undefined, 8000);
     let seoStrategy: Record<string, unknown> = {};
     try {
       seoStrategy = JSON.parse(seoStrategyRaw.replace(/```json?\n?/g, "").replace(/```/g, "").trim());
@@ -243,30 +254,13 @@ Output as JSON:
       seoStrategy = {};
     }
 
-    // 5. Agent 3 — GBP Products Generator
-    const productsPrompt = `Create 8-12 GBP Product listings for ${businessName}, a ${niche.niche_name || nicheKey} in ${serviceArea}.
-
-Services offered: ${primaryServices}
-Years in business: ${yearsInBusiness}
-USP: ${usp}
-Niche GBP Products templates: ${JSON.stringify(niche.gbp_products || [])}
-
-For EACH Product:
-- Max 1000 characters description
-- Structure: what the service is → common problems it solves → how this business delivers it → full CTA with business name, address, phone
-- Factual and specific — NOT sales copy
-- Include relevant stats, timelines, or data points
-- Naturally include service + city keywords
-
-Output as JSON array: [{"title": "", "description": "", "category": ""}]`;
-
-    const productsRaw = await callClaude(productsPrompt, undefined, 4000);
-    let products: Array<Record<string, string>> = [];
-    try {
-      products = JSON.parse(productsRaw.replace(/```json?\n?/g, "").replace(/```/g, "").trim());
-    } catch {
-      products = [];
-    }
+    // Extract arrays with safe fallbacks
+    const products = Array.isArray(seoStrategy.gbp_products) ? seoStrategy.gbp_products as Array<Record<string, string>> : [];
+    const services = Array.isArray(seoStrategy.gbp_services) ? seoStrategy.gbp_services as Array<Record<string, string>> : [];
+    const photoFilenames = Array.isArray(seoStrategy.photo_filenames) ? seoStrategy.photo_filenames as string[] : [];
+    const targetKeywords = Array.isArray(seoStrategy.target_keywords) ? seoStrategy.target_keywords as Array<Record<string, string>> : [];
+    const qaTopics = Array.isArray(seoStrategy.qa_topics) ? seoStrategy.qa_topics as Array<Record<string, string>> : [];
+    const businessDescription = (seoStrategy.business_description_750 as string) || "";
 
     // 6. Generate client_id and save to DB
     const clientId = clientIdFromPayload || `client-${Date.now()}`;
@@ -354,29 +348,135 @@ Output as JSON array: [{"title": "", "description": "", "category": ""}]`;
       [clientId]
     );
 
-    // 10. Email VA with setup instructions
+    // 10. Email VA with comprehensive action kit
+    const secondaryCategories = Array.isArray(seoStrategy.secondary_categories)
+      ? seoStrategy.secondary_categories as string[]
+      : [];
+
+    const sectionHeader = (title: string) =>
+      `<div style="background:#1a1a2e;color:white;padding:12px 20px;font-size:16px;margin-top:24px;">${title}</div>`;
+    const contentBlock = (inner: string) =>
+      `<div style="background:white;padding:20px;border:1px solid #e0e0e0;">${inner}</div>`;
+    const copyBox = (text: string) =>
+      `<div style="background:#f8f8f8;padding:12px;font-family:monospace;font-size:13px;border:1px solid #ddd;white-space:pre-wrap;">${text}</div>`;
+    const charCount = (text: string, max: number) =>
+      `<div style="color:#666;font-size:12px;">(${text.length} / ${max} characters)</div>`;
+
+    const productsHtml = products.map((p, i) => `
+      <div style="margin-top:16px;">
+        <div style="color:#666;font-size:13px;letter-spacing:2px;">━━━ PRODUCT ${i + 1} of ${products.length} ━━━</div>
+        <p><strong>${p.title}</strong></p>
+        <p style="color:#666;font-size:13px;">Category: ${p.category || "General"}</p>
+        ${copyBox(p.description || "")}
+        ${charCount(p.description || "", 1000)}
+      </div>`).join("");
+
+    const servicesHtml = services.map((s, i) =>
+      `<p>${i + 1}. <strong>${s.name}</strong> — ${s.one_liner || ""}</p>`
+    ).join("");
+
+    const photoFilenamesHtml = photoFilenames.map((f) =>
+      `<li style="font-family:monospace;font-size:13px;">${f}</li>`
+    ).join("");
+
+    const keywordsTableRows = targetKeywords.map((kw) =>
+      `<tr><td style="padding:6px 12px;border:1px solid #ddd;">${kw.keyword}</td><td style="padding:6px 12px;border:1px solid #ddd;">${kw.intent}</td><td style="padding:6px 12px;border:1px solid #ddd;">${kw.impact}</td></tr>`
+    ).join("");
+
+    const qaHtml = qaTopics.map((qa, i) =>
+      `<p>${i + 1}. <strong>${qa.question}</strong><br/><span style="color:#555;">${qa.answer_outline || ""}</span></p>`
+    ).join("");
+
+    const guaranteeSection = (seoStrategy.guarantee_keyword as string)
+      ? `${sectionHeader("J. GUARANTEE INFO")}${contentBlock(`
+          <p><strong>Guarantee Keyword:</strong> ${seoStrategy.guarantee_keyword}</p>
+          <p><strong>Market Qualification:</strong> ${audit?.market_competition_level || "N/A"}</p>
+        `)}`
+      : "";
+
     const emailHtml = `
-      <h2>New Client Onboarding: ${businessName}</h2>
+<div style="background:#f4f4f4;font-family:Arial,sans-serif;padding:20px;">
+  <div style="max-width:700px;margin:0 auto;">
+    <h1 style="text-align:center;color:#1a1a2e;">New Client Action Kit</h1>
+
+    ${sectionHeader("A. CLIENT OVERVIEW")}
+    ${contentBlock(`
+      <p><strong>Business Name:</strong> ${businessName}</p>
       <p><strong>Client ID:</strong> ${clientId}</p>
-      <p><strong>Business:</strong> ${businessName}</p>
       <p><strong>Address:</strong> ${enrichedAddress}</p>
       <p><strong>Phone:</strong> ${phone}</p>
-      <p><strong>Website:</strong> ${website}</p>
+      <p><strong>Website:</strong> ${website || "N/A"}</p>
       <p><strong>Niche:</strong> ${niche.niche_name || nicheKey}</p>
-      <p><strong>Services:</strong> ${primaryServices}</p>
       <p><strong>Service Area:</strong> ${serviceArea}</p>
-      <h3>SEO Strategy</h3>
-      <p><strong>Primary Category:</strong> ${seoStrategy.primary_category || ""}</p>
-      <p><strong>Secondary Categories:</strong> ${JSON.stringify(seoStrategy.secondary_categories || [])}</p>
-      <p><strong>Guarantee Keyword:</strong> ${seoStrategy.guarantee_keyword || ""}</p>
-      <h3>GBP Products Generated: ${products.length}</h3>
-      <ul>${products.map((p) => `<li>${p.title}</li>`).join("")}</ul>
-    `;
+      <p><strong>Services:</strong> ${primaryServices}</p>
+      <p><strong>USP:</strong> ${usp}</p>
+      <p><strong>Owner:</strong> ${ownerName || "N/A"} | ${ownerEmail || "N/A"} | ${ownerPhone || "N/A"}</p>
+      <p><strong>Google Review URL:</strong> ${reviewUrl || "N/A"}</p>
+    `)}
+
+    ${sectionHeader("B. GBP CATEGORIES")}
+    ${contentBlock(`
+      <p><strong>Primary Category:</strong></p>
+      ${copyBox((seoStrategy.primary_category as string) || "")}
+      <p style="margin-top:12px;"><strong>Secondary Categories:</strong></p>
+      ${secondaryCategories.map((cat) => copyBox(cat)).join("")}
+    `)}
+
+    ${sectionHeader("C. BUSINESS DESCRIPTION")}
+    ${contentBlock(`
+      ${copyBox(businessDescription)}
+      ${charCount(businessDescription, 750)}
+    `)}
+
+    ${sectionHeader(`D. GBP PRODUCTS (${products.length})`)}
+    ${contentBlock(productsHtml || "<p>No products generated</p>")}
+
+    ${sectionHeader("E. GBP SERVICES")}
+    ${contentBlock(servicesHtml || "<p>No services generated</p>")}
+
+    ${sectionHeader("F. PHOTO UPLOAD FILENAMES")}
+    ${contentBlock(`<ul>${photoFilenamesHtml || "<li>No filenames generated</li>"}</ul>`)}
+
+    ${sectionHeader("G. TARGET KEYWORDS")}
+    ${contentBlock(`
+      <table style="width:100%;border-collapse:collapse;">
+        <tr style="background:#eee;"><th style="padding:6px 12px;border:1px solid #ddd;text-align:left;">Keyword</th><th style="padding:6px 12px;border:1px solid #ddd;text-align:left;">Intent</th><th style="padding:6px 12px;border:1px solid #ddd;text-align:left;">Impact</th></tr>
+        ${keywordsTableRows}
+      </table>
+    `)}
+
+    ${sectionHeader("H. Q&A TOPICS")}
+    ${contentBlock(qaHtml || "<p>No Q&A topics generated</p>")}
+
+    ${sectionHeader("I. ONBOARDING CHECKLIST")}
+    ${contentBlock(`
+      <p>□ GBP — Set primary category: ${(seoStrategy.primary_category as string) || ""}</p>
+      <p>□ GBP — Add 4 secondary categories (listed above)</p>
+      <p>□ GBP — Paste business description (Section C)</p>
+      <p>□ GBP — Confirm hours are correct</p>
+      <p>□ GBP — Upload photos with filenames above</p>
+      <p>□ GBP — Add all ${products.length} Products (Section D)</p>
+      <p>□ GBP — Add all ${services.length} Services (Section E)</p>
+      <p>□ Schema — Paste JSON-LD into client website &lt;head&gt; (separate email from WF19)</p>
+      <p>□ Authority — Claim/create Yelp listing → save URL to GHL</p>
+      <p>□ Authority — Claim/create BBB listing → save URL to GHL</p>
+      <p>□ Authority — Claim/create Facebook Business Page → save URL to GHL</p>
+      <p>□ Authority — Create LinkedIn Company Page → save URL to GHL</p>
+      <p>□ BrightLocal — Create campaign in dashboard</p>
+      <p>□ BrightLocal — Add keyword: ${(seoStrategy.guarantee_keyword as string) || ""}</p>
+      <p>□ BrightLocal — Submit to data aggregators</p>
+      <p>□ GHL — Verify client contact tags</p>
+      <p>□ GHL — Build review request URL</p>
+    `)}
+
+    ${guaranteeSection}
+  </div>
+</div>`;
 
     try {
       await sendEmail(
         "henry@autobodyaccelerator.com",
-        `New Client Setup: ${businessName} — ${clientId}`,
+        `New Client Ready: ${businessName} — Onboarding Kit`,
         emailHtml
       );
     } catch (emailErr) {
@@ -389,56 +489,85 @@ Output as JSON array: [{"title": "", "description": "", "category": ""}]`;
       [clientId]
     );
 
-    // 12. Post Slack notification
+    // 12. Post Slack notification to #maps-onboarding
     try {
       const slackBotToken = process.env.SLACK_BOT_TOKEN;
       if (slackBotToken) {
+        const descPreview = businessDescription.length > 200
+          ? businessDescription.slice(0, 200) + "..."
+          : businessDescription;
+        const keywordsList = targetKeywords.map((kw) => `\`${kw.keyword}\` (${kw.impact})`).join(", ");
+        const filenamesList = photoFilenames.map((f) => `\`${f}\``).join("\n• ");
+
         const slackMessage = `🎉 *New Client Onboarded!*
 
-*Business:* ${businessName}
-*Location:* ${enrichedCity}, ${enrichedState}
-*Niche:* ${niche.niche_name || nicheKey}
-*Client ID:* \`${clientId}\`
+*📋 Business Overview:*
+• *Name:* ${businessName}
+• *Client ID:* \`${clientId}\`
+• *Location:* ${enrichedAddress || `${enrichedCity}, ${enrichedState}`}
+• *Phone:* ${phone}
+• *Website:* ${website || "N/A"}
+• *Niche:* ${niche.niche_name || nicheKey}
+• *Service Area:* ${serviceArea}
+• *Services:* ${primaryServices}
+• *Owner:* ${ownerName || "N/A"} | ${ownerEmail || "N/A"} | ${ownerPhone || "N/A"}
 
-*Contact Info:*
-• Phone: ${phone}
-• Email: ${ownerEmail}
-• Website: ${website || 'N/A'}
+*🏷️ GBP Categories:*
+• *Primary:* \`${(seoStrategy.primary_category as string) || "N/A"}\`
+• *Secondary:* ${secondaryCategories.map((c) => `\`${c}\``).join(", ") || "N/A"}
 
-*SEO Setup:*
-• Primary Keyword: ${enrichedPrimaryKeyword}
-• GBP Location ID: ${enrichedGbpLocationId || 'N/A'}
-• Products Generated: ${products.length}
-• Activation Status: ✅ Complete
+*📝 Business Description (preview):*
+\`\`\`${descPreview}\`\`\`
 
-*Next Steps:*
-• WF01B will push GBP products to Google
-• WF02 will generate blog content
-• WF05 will submit citations
-• WF03 will start monitoring reviews`;
+*📦 GBP Products:* ${products.length} generated
+*🔧 GBP Services:* ${services.length} generated
+*📸 Photo Filenames:*
+• ${filenamesList || "None generated"}
+
+*🔑 Target Keywords:*
+${keywordsList || "None generated"}
+
+*✅ Onboarding Checklist:*
+☐ GBP — Set primary category: \`${(seoStrategy.primary_category as string) || ""}\`
+☐ GBP — Add 4 secondary categories
+☐ GBP — Paste business description (750 chars)
+☐ GBP — Confirm hours are correct
+☐ GBP — Upload photos with filenames
+☐ GBP — Add all ${products.length} Products
+☐ GBP — Add all ${services.length} Services
+☐ Schema — Paste JSON-LD into website <head>
+☐ Authority — Claim/create Yelp listing → save URL to GHL
+☐ Authority — Claim/create BBB listing → save URL to GHL
+☐ Authority — Claim/create Facebook Business Page → save URL to GHL
+☐ Authority — Create LinkedIn Company Page → save URL to GHL
+☐ BrightLocal — Create campaign in dashboard
+☐ BrightLocal — Add keyword: \`${(seoStrategy.guarantee_keyword as string) || ""}\`
+☐ BrightLocal — Submit to data aggregators
+☐ GHL — Verify client contact tags
+☐ GHL — Build review request URL`;
 
         const slackResponse = await axios.post(
-          'https://slack.com/api/chat.postMessage',
+          "https://slack.com/api/chat.postMessage",
           {
-            channel: '#maps-sales',
+            channel: "#maps-onboarding",
             text: slackMessage,
           },
           {
             headers: {
-              'Authorization': `Bearer ${slackBotToken}`,
-              'Content-Type': 'application/json',
+              Authorization: `Bearer ${slackBotToken}`,
+              "Content-Type": "application/json",
             },
           }
         );
 
         if (slackResponse.data.ok) {
-          console.log(`[WF01] ✅ Posted onboarding notification to #maps-sales`);
+          console.log("[WF01] Posted onboarding notification to #maps-onboarding");
         } else {
           console.error(`[WF01] Slack error: ${slackResponse.data.error}`);
         }
       }
     } catch (slackErr) {
-      console.error('[WF01] Slack notification failed (non-critical):', slackErr);
+      console.error("[WF01] Slack notification failed (non-critical):", slackErr);
     }
 
     return { success: true, client_id: clientId };
