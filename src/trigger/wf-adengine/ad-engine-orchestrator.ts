@@ -96,6 +96,7 @@ export const adEngineOrchestrator = schemaTask({
     await postImagesToSlack({
       projectId,
       images: anchorFrames.imageUrls,
+      assetIds: anchorFrames.assetIds,
       message: `🖼️ *${payload.project_name}* — Anchor Frame Options\nPick your favorite. React with ✅ on the winner.`,
       checkpointType: "anchor_review",
     });
@@ -136,6 +137,7 @@ export const adEngineOrchestrator = schemaTask({
       await postImagesToSlack({
         projectId,
         images: scene.imageUrls,
+        assetIds: scene.assetIds,
         message: `🖼️ *${payload.project_name}* — Scene ${scene.sceneNumber}: "${scene.sceneName}"\nPick your favorite. React ✅ on the winner.`,
         checkpointType: "scene_review",
         sceneNumber: scene.sceneNumber,

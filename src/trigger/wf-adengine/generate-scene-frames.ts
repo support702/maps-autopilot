@@ -62,6 +62,7 @@ export const generateSceneFrames = task({
       const prompts = await generateScenePrompts(scene, cameraSpec, visualStyle, colorGrade);
 
       const sceneImageUrls: string[] = [];
+      const sceneAssetIds: string[] = [];
 
       for (let v = 0; v < prompts.length; v++) {
         const fullPrompt = `${prompts[v]} — Use the same style, lighting, and aesthetic from the reference image.`;
@@ -76,7 +77,7 @@ export const generateSceneFrames = task({
 
         sceneImageUrls.push(imageUrl);
 
-        await saveAsset({
+        const assetId = await saveAsset({
           project_id: projectId,
           phase: "scene",
           scene_number: scene.scene_number,
@@ -88,12 +89,15 @@ export const generateSceneFrames = task({
           kie_task_id: taskId,
           cost_credits: 0.12,
         });
+
+        sceneAssetIds.push(assetId);
       }
 
       results.push({
         sceneNumber: scene.scene_number,
         sceneName: scene.scene_name,
         imageUrls: sceneImageUrls,
+        assetIds: sceneAssetIds,
       });
     }
 

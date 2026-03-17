@@ -18,6 +18,7 @@ interface SlackMessageOptions {
 
 interface SlackImageOptions extends SlackMessageOptions {
   images: string[];
+  assetIds: string[];
 }
 
 interface SlackVideoOptions extends SlackMessageOptions {
@@ -53,7 +54,8 @@ export async function postToSlack(message: string): Promise<void> {
 }
 
 /**
- * Post images to Slack with reaction prompts
+ * Post images to Slack — each image as a SEPARATE message for individual reactions.
+ * Each message is linked to its specific asset_id in ad_engine_slack_messages.
  */
 export async function postImagesToSlack(options: SlackImageOptions): Promise<void> {
   if (!SLACK_BOT_TOKEN) {
@@ -61,27 +63,10 @@ export async function postImagesToSlack(options: SlackImageOptions): Promise<voi
     return;
   }
 
-  // Post message with image attachments
-  const blocks = [
-    {
-      type: "section",
-      text: {
-        type: "mrkdwn",
-        text: options.message,
-      },
-    },
-  ];
+  const totalImages = options.images.length;
 
-  // Add image blocks
-  for (const imageUrl of options.images) {
-    blocks.push({
-      type: "image",
-      image_url: imageUrl,
-      alt_text: `Scene ${options.sceneNumber || "preview"}`,
-    });
-  }
-
-  const response = await fetch("https://slack.com/api/chat.postMessage", {
+  // Post header message first
+  await fetch("https://slack.com/api/chat.postMessage", {
     method: "POST",
     headers: {
       "Authorization": `Bearer ${SLACK_BOT_TOKEN}`,
@@ -90,23 +75,57 @@ export async function postImagesToSlack(options: SlackImageOptions): Promise<voi
     body: JSON.stringify({
       channel: SLACK_CHANNEL,
       text: options.message,
-      blocks,
+      mrkdwn: true,
     }),
   });
 
-  const data = await response.json();
-  if (!data.ok) {
-    throw new Error(`Slack API error: ${data.error}`);
-  }
+  // Post each image as a separate message
+  for (let i = 0; i < totalImages; i++) {
+    const imageUrl = options.images[i];
+    const assetId = options.assetIds[i];
+    const label = `Option ${i + 1} of ${totalImages}`;
 
-  // Save Slack message reference for webhook handling
-  if (options.checkpointType) {
-    await saveSlackMessage({
-      projectId: options.projectId,
-      slackMessageTs: data.ts,
-      checkpointType: options.checkpointType,
-      sceneNumber: options.sceneNumber,
+    const response = await fetch("https://slack.com/api/chat.postMessage", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${SLACK_BOT_TOKEN}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        channel: SLACK_CHANNEL,
+        text: label,
+        blocks: [
+          {
+            type: "section",
+            text: {
+              type: "mrkdwn",
+              text: `*${label}*${options.sceneNumber ? ` — Scene ${options.sceneNumber}` : ""}`,
+            },
+          },
+          {
+            type: "image",
+            image_url: imageUrl,
+            alt_text: label,
+          },
+        ],
+      }),
     });
+
+    const data = await response.json();
+    if (!data.ok) {
+      throw new Error(`Slack API error posting image ${i + 1}: ${data.error}`);
+    }
+
+    // Save each message with its specific asset_id
+    if (options.checkpointType) {
+      await saveSlackMessage({
+        projectId: options.projectId,
+        slackMessageTs: data.ts,
+        checkpointType: options.checkpointType,
+        sceneNumber: options.sceneNumber,
+        assetId,
+      });
+    }
   }
 }
 
@@ -264,12 +283,13 @@ async function saveSlackMessage(data: {
   slackMessageTs: string;
   checkpointType: string;
   sceneNumber?: number;
+  assetId?: string;
 }): Promise<void> {
   await query(
-    `INSERT INTO ad_engine_slack_messages 
-     (project_id, slack_message_ts, slack_channel, checkpoint_type) 
-     VALUES ($1, $2, $3, $4)`,
-    [data.projectId, data.slackMessageTs, SLACK_CHANNEL, data.checkpointType]
+    `INSERT INTO ad_engine_slack_messages
+     (project_id, asset_id, slack_message_ts, slack_channel, checkpoint_type)
+     VALUES ($1, $2, $3, $4, $5)`,
+    [data.projectId, data.assetId ?? null, data.slackMessageTs, SLACK_CHANNEL, data.checkpointType]
   );
 }
 

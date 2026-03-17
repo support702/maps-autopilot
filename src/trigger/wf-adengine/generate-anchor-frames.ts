@@ -14,7 +14,7 @@ export const generateAnchorFrames = task({
     projectId: string;
     prompts: string[];
     aspectRatio: string;
-  }): Promise<{ imageUrls: string[] }> => {
+  }): Promise<{ imageUrls: string[]; assetIds: string[] }> => {
     const { projectId, prompts, aspectRatio } = payload;
 
     if (!prompts || prompts.length === 0) {
@@ -24,6 +24,7 @@ export const generateAnchorFrames = task({
     await updateProjectStatus(projectId, "anchor_generating");
 
     const imageUrls: string[] = [];
+    const assetIds: string[] = [];
 
     for (let i = 0; i < prompts.length; i++) {
       const { imageUrl, taskId } = await generateImage({
@@ -34,7 +35,7 @@ export const generateAnchorFrames = task({
 
       imageUrls.push(imageUrl);
 
-      await saveAsset({
+      const assetId = await saveAsset({
         project_id: projectId,
         phase: "anchor",
         variation_number: i + 1,
@@ -45,10 +46,12 @@ export const generateAnchorFrames = task({
         kie_task_id: taskId,
         cost_credits: 0.12,
       });
+
+      assetIds.push(assetId);
     }
 
     await updateProjectStatus(projectId, "anchor_review");
 
-    return { imageUrls };
+    return { imageUrls, assetIds };
   },
 });

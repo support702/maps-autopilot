@@ -82,6 +82,7 @@ export interface SceneFrameResult {
   sceneNumber: number;
   sceneName: string;
   imageUrls: string[];
+  assetIds: string[];
 }
 
 export interface VideoClipResult {
