@@ -2,6 +2,7 @@ import { task } from "@trigger.dev/sdk";
 import { query } from "../lib/db";
 import { callClaude } from "../lib/anthropic";
 import { sendEmail } from "../lib/email";
+import axios from "axios";
 
 interface OnboardingPayload {
   [key: string]: unknown;
@@ -387,6 +388,58 @@ Output as JSON array: [{"title": "", "description": "", "category": ""}]`;
       "UPDATE clients SET activation_complete = true WHERE client_id = $1",
       [clientId]
     );
+
+    // 12. Post Slack notification
+    try {
+      const slackBotToken = process.env.SLACK_BOT_TOKEN;
+      if (slackBotToken) {
+        const slackMessage = `🎉 *New Client Onboarded!*
+
+*Business:* ${businessName}
+*Location:* ${enrichedCity}, ${enrichedState}
+*Niche:* ${niche.niche_name || nicheKey}
+*Client ID:* \`${clientId}\`
+
+*Contact Info:*
+• Phone: ${phone}
+• Email: ${ownerEmail}
+• Website: ${website || 'N/A'}
+
+*SEO Setup:*
+• Primary Keyword: ${enrichedPrimaryKeyword}
+• GBP Location ID: ${enrichedGbpLocationId || 'N/A'}
+• Products Generated: ${products.length}
+• Activation Status: ✅ Complete
+
+*Next Steps:*
+• WF01B will push GBP products to Google
+• WF02 will generate blog content
+• WF05 will submit citations
+• WF03 will start monitoring reviews`;
+
+        const slackResponse = await axios.post(
+          'https://slack.com/api/chat.postMessage',
+          {
+            channel: '#maps-sales',
+            text: slackMessage,
+          },
+          {
+            headers: {
+              'Authorization': `Bearer ${slackBotToken}`,
+              'Content-Type': 'application/json',
+            },
+          }
+        );
+
+        if (slackResponse.data.ok) {
+          console.log(`[WF01] ✅ Posted onboarding notification to #maps-sales`);
+        } else {
+          console.error(`[WF01] Slack error: ${slackResponse.data.error}`);
+        }
+      }
+    } catch (slackErr) {
+      console.error('[WF01] Slack notification failed (non-critical):', slackErr);
+    }
 
     return { success: true, client_id: clientId };
   },
