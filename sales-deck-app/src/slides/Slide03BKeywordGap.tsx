@@ -7,6 +7,10 @@ export function Slide03BKeywordGap({ data }: { data: AuditData }) {
   const gap = data.keywordGap;
   if (!gap) return null;
 
+  const visibilityPercent = Math.round((gap.visible / gap.total) * 100);
+  const isGoodScore = visibilityPercent >= 50;
+  const cleanKeyword = (kw: string) => kw.replace(/ near me$/i, '');
+
   return (
     <SlideTransition>
       <motion.h2
@@ -14,104 +18,95 @@ export function Slide03BKeywordGap({ data }: { data: AuditData }) {
         animate={{ opacity: 1 }}
         className="mb-8 text-4xl font-bold text-white"
       >
-        Your <span className="text-[#4ECDC4]">Keyword</span> Visibility
+        The <span className="text-[#F5820A]">Keyword</span> Gap
       </motion.h2>
 
-      <div className="flex w-full max-w-4xl gap-6">
-        {/* Prospect Scorecard */}
+      {/* Two-Column Scorecard */}
+      <div className="mb-8 flex w-full max-w-5xl gap-6">
+        {/* Prospect Score */}
         <GlassCard
           initial={{ opacity: 0, x: -40 }}
           animate={{ opacity: 1, x: 0 }}
           transition={{ delay: 0.2 }}
-          className="flex-1"
+          className="flex-1 text-center"
         >
-          <h3 className="mb-4 text-center text-lg font-semibold text-white">
-            {data.prospect_name}
-          </h3>
-          <p className="mb-3 text-center text-sm text-white/40">
-            {gap.visible}/{gap.total} keywords ranked
+          <h3 className="mb-2 text-lg font-semibold text-white/70">Your Visibility</h3>
+          <p className={`mb-2 text-6xl font-black ${isGoodScore ? 'text-emerald-400' : 'text-red-400'}`}>
+            {gap.visible}/{gap.total}
           </p>
-          <div className="space-y-2">
-            {gap.keywords.map((kw, i) => (
-              <motion.div
-                key={kw.keyword}
-                initial={{ opacity: 0, x: -20 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: 0.3 + i * 0.08 }}
-                className="flex items-center justify-between rounded-lg bg-white/5 px-3 py-2"
-              >
-                <span className="text-sm text-white/70">{kw.keyword}</span>
-                {kw.visible ? (
-                  <span className="flex items-center gap-1 text-sm font-bold text-emerald-400">
-                    ✓ #{kw.rank}
-                  </span>
-                ) : (
-                  <span className="text-sm font-bold text-red-400">✗</span>
-                )}
-              </motion.div>
-            ))}
-          </div>
+          <p className="text-sm text-white/50">
+            You rank for {gap.visible} out of {gap.total} high-ticket keywords
+          </p>
         </GlassCard>
 
-        {/* VS Divider */}
-        <motion.div
-          initial={{ opacity: 0, scale: 0.5 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ delay: 0.5 }}
-          className="flex items-center"
-        >
-          <span className="text-2xl font-black text-white/20">VS</span>
-        </motion.div>
-
-        {/* Competitor Scorecard */}
+        {/* Competitor Score */}
         <GlassCard
           initial={{ opacity: 0, x: 40 }}
           animate={{ opacity: 1, x: 0 }}
           transition={{ delay: 0.3 }}
-          className="flex-1"
+          className="flex-1 text-center"
         >
-          <h3 className="mb-4 text-center text-lg font-semibold text-[#4ECDC4]">
-            {gap.dominantCompetitor}
+          <h3 className="mb-2 text-lg font-semibold text-white/70">
+            {gap.dominantCompetitor === 'Unknown' ? 'Market Leader' : gap.dominantCompetitor}
           </h3>
-          <p className="mb-3 text-center text-sm text-white/40">
-            {gap.dominantCompetitorKeywords}/{gap.total} keywords ranked
+          <p className="mb-2 text-6xl font-black text-emerald-400">
+            {gap.dominantCompetitorKeywords}/{gap.total}
           </p>
-          <div className="space-y-2">
-            {gap.keywords.map((kw, i) => (
-              <motion.div
-                key={kw.keyword}
-                initial={{ opacity: 0, x: 20 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: 0.4 + i * 0.08 }}
-                className="flex items-center justify-between rounded-lg bg-white/5 px-3 py-2"
-              >
-                <span className="text-sm text-white/70">{kw.keyword}</span>
-                <span className="flex items-center gap-1 text-sm font-bold text-emerald-400">
-                  ✓ #1
-                </span>
-              </motion.div>
-            ))}
-          </div>
+          <p className="text-sm text-white/50">
+            Ranks for {gap.dominantCompetitorKeywords} out of {gap.total} keywords
+          </p>
         </GlassCard>
       </div>
 
-      {/* Gap Score */}
-      <motion.div
+      {/* Keyword Breakdown List */}
+      <GlassCard
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 1.2 }}
-        className="mt-8 text-center"
+        transition={{ delay: 0.4 }}
+        className="w-full max-w-5xl"
       >
-        <p className="text-5xl font-black text-[#4ECDC4]">{gap.score}/100</p>
-        <p className="mt-1 text-sm text-white/40">Keyword Visibility Score</p>
-      </motion.div>
+        <div className="max-h-[400px] space-y-2 overflow-y-auto pr-4">
+          {gap.keywords.map((kw, i) => (
+            <motion.div
+              key={kw.keyword}
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: 0.5 + i * 0.05 }}
+              className="flex items-center justify-between rounded-lg bg-white/5 px-4 py-3 hover:bg-white/10 transition-colors"
+            >
+              {/* Left: Check/X */}
+              <div className="flex items-center gap-3 flex-1">
+                <span className={`text-2xl font-bold ${kw.visible ? 'text-emerald-400' : 'text-red-400'}`}>
+                  {kw.visible ? '✓' : '✗'}
+                </span>
+                <span className="text-base font-medium text-white">
+                  {cleanKeyword(kw.keyword)}
+                </span>
+              </div>
 
-      {/* Bottom CTA */}
+              {/* Right: Rank Status */}
+              <div className="text-right">
+                {kw.visible && kw.rank ? (
+                  <span className="text-sm font-bold text-emerald-400">
+                    You're #{kw.rank}
+                  </span>
+                ) : (
+                  <span className="text-sm text-red-400/70">
+                    Not ranking in top 20
+                  </span>
+                )}
+              </div>
+            </motion.div>
+          ))}
+        </div>
+      </GlassCard>
+
+      {/* Bottom Warning */}
       <motion.p
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
-        transition={{ delay: 1.5 }}
-        className="mt-6 max-w-xl text-center text-lg italic text-red-400/80"
+        transition={{ delay: 0.8 }}
+        className="mt-8 text-2xl font-medium text-white/70"
       >
         Every keyword you don't rank for is a customer calling someone else.
       </motion.p>
