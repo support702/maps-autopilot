@@ -5,7 +5,7 @@
 
 import { schemaTask, wait } from "@trigger.dev/sdk";
 import { z } from "zod";
-import { createProject, updateProjectStatus } from "./db.js";
+import { createProject, updateProjectStatus, getApprovedAssets, calculateProjectCost } from "./db.js";
 import { generateStoryboard } from "./generate-storyboard.js";
 import { generateAnchorFrames } from "./generate-anchor-frames.js";
 import { generateSceneFrames } from "./generate-scene-frames.js";
@@ -101,13 +101,16 @@ export const adEngineOrchestrator = schemaTask({
       checkpointType: "anchor_review",
     });
 
-    // ★ HUMAN CHECKPOINT 1: Wait for Slack reaction
-    const anchorApproval = await wait.forToken({
-      token: `anchor-approval-${projectId}`,
-      timeoutInSeconds: 86400, // 24 hours
-    });
-
-    const approvedAnchorUrl = anchorApproval.data.approvedImageUrl as string;
+    // ★ HUMAN CHECKPOINT 1: Poll DB until anchor is approved
+    let approvedAnchorUrl = "";
+    while (true) {
+      const approved = await getApprovedAssets(projectId, "anchor");
+      if (approved.length > 0) {
+        approvedAnchorUrl = approved[0].asset_url;
+        break;
+      }
+      await wait.for({ seconds: 15 });
+    }
 
     await postToSlack(`✅ Anchor frame approved for *${payload.project_name}*`);
 
@@ -144,13 +147,23 @@ export const adEngineOrchestrator = schemaTask({
       });
     }
 
-    // ★ HUMAN CHECKPOINT 2: Wait for all scene approvals
-    const sceneApprovals = await wait.forToken({
-      token: `scenes-approval-${projectId}`,
-      timeoutInSeconds: 86400,
-    });
-
-    const approvedSceneUrls = sceneApprovals.data.approvedSceneUrls as Record<number, string>;
+    // ★ HUMAN CHECKPOINT 2: Poll DB until all scenes are approved
+    const totalScenes = storyboard.scenes.length;
+    let approvedSceneUrls: Record<number, string> = {};
+    while (true) {
+      const approved = await getApprovedAssets(projectId, "scene");
+      const byScene: Record<number, string> = {};
+      for (const asset of approved) {
+        if (asset.scene_number != null) {
+          byScene[asset.scene_number] = asset.asset_url;
+        }
+      }
+      if (Object.keys(byScene).length >= totalScenes) {
+        approvedSceneUrls = byScene;
+        break;
+      }
+      await wait.for({ seconds: 15 });
+    }
 
     await postToSlack(`✅ All scenes approved for *${payload.project_name}*`);
 
@@ -183,13 +196,26 @@ export const adEngineOrchestrator = schemaTask({
       });
     }
 
-    // ★ HUMAN CHECKPOINT 3: Wait for video approvals
-    const videoApprovals = await wait.forToken({
-      token: `videos-approval-${projectId}`,
-      timeoutInSeconds: 86400,
-    });
-
-    const approvedClipUrls = videoApprovals.data.approvedClipUrls as string[];
+    // ★ HUMAN CHECKPOINT 3: Poll DB until all video clips are approved
+    let approvedClipUrls: string[] = [];
+    while (true) {
+      const approved = await getApprovedAssets(projectId, "video");
+      const byScene: Record<number, string> = {};
+      for (const asset of approved) {
+        if (asset.scene_number != null) {
+          byScene[asset.scene_number] = asset.asset_url;
+        }
+      }
+      if (Object.keys(byScene).length >= totalScenes) {
+        // Build ordered array by scene number
+        approvedClipUrls = Object.keys(byScene)
+          .map(Number)
+          .sort((a, b) => a - b)
+          .map((sceneNum) => byScene[sceneNum]);
+        break;
+      }
+      await wait.for({ seconds: 15 });
+    }
 
     await postToSlack(`✅ All video clips approved for *${payload.project_name}*`);
 
@@ -215,11 +241,16 @@ export const adEngineOrchestrator = schemaTask({
       voiceover.audioUrls.map((url, i) => `Option ${i + 1}: ${url}`).join("\n")
     );
 
-    // ★ HUMAN CHECKPOINT 4: Wait for voiceover approval
-    const voiceoverApproval = await wait.forToken({
-      token: `voiceover-approval-${projectId}`,
-      timeoutInSeconds: 86400,
-    });
+    // ★ HUMAN CHECKPOINT 4: Poll DB until voiceover is approved
+    let approvedVoiceoverUrl = "";
+    while (true) {
+      const approved = await getApprovedAssets(projectId, "voiceover");
+      if (approved.length > 0) {
+        approvedVoiceoverUrl = approved[0].asset_url;
+        break;
+      }
+      await wait.for({ seconds: 15 });
+    }
 
     // ========================================
     // FINAL: Deliver all approved assets
@@ -230,7 +261,7 @@ export const adEngineOrchestrator = schemaTask({
       `✅ *${payload.project_name}* — ALL ASSETS READY\n\n` +
       `📹 *Approved video clips:*\n` +
       approvedClipUrls.map((url, i) => `Scene ${i + 1}: ${url}`).join("\n") +
-      `\n\n🎤 *Voiceover:* ${voiceover.approvedUrl}\n\n` +
+      `\n\n🎤 *Voiceover:* ${approvedVoiceoverUrl}\n\n` +
       `Open CapCut and assemble your ad!\n` +
       `💰 Total cost: $${await calculateProjectCost(projectId)}`
     );
@@ -239,16 +270,7 @@ export const adEngineOrchestrator = schemaTask({
       projectId,
       status: "assets_delivered",
       approvedClips: approvedClipUrls,
-      voiceoverUrl: voiceover.approvedUrl,
+      voiceoverUrl: approvedVoiceoverUrl,
     };
   },
 });
-
-/**
- * Calculate total API cost for the project
- */
-async function calculateProjectCost(projectId: string): Promise<string> {
-  // TODO: Sum up cost_credits from ad_engine_assets table
-  // For now, return estimated cost
-  return "7.50-15.00";
-}

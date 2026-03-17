@@ -7,33 +7,6 @@ import { query } from "../../lib/db.js";
 
 const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN;
 const SLACK_CHANNEL = process.env.SLACK_CHANNEL_AD_ENGINE || "#ad-engine";
-const TRIGGER_API_URL = "https://api.trigger.dev";
-
-/**
- * Complete a Trigger.dev wait token via REST API
- * The SDK's `runs` object does not expose completeWaitForToken —
- * use the HTTP endpoint instead.
- */
-async function completeWaitToken(token: string, data: Record<string, unknown>): Promise<void> {
-  const secretKey = process.env.TRIGGER_SECRET_KEY;
-  if (!secretKey) {
-    throw new Error("TRIGGER_SECRET_KEY not set — cannot complete wait token");
-  }
-
-  const response = await fetch(`${TRIGGER_API_URL}/api/v1/wait-tokens/${encodeURIComponent(token)}/complete`, {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${secretKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ data }),
-  });
-
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`Failed to complete wait token "${token}": ${response.status} ${body}`);
-  }
-}
 
 interface SlackMessageOptions {
   projectId: string;
@@ -239,53 +212,20 @@ export async function handleSlackReaction(event: {
 
   // Handle approval (✅ reaction)
   if (event.reaction === "white_check_mark") {
-    // Get the asset that was approved
+    // Mark the asset as approved in the DB — the orchestrator polls for this
     if (slackMessage.asset_id) {
       await query(
-        `UPDATE ad_engine_assets 
-         SET is_approved = true, approved_at = NOW() 
+        `UPDATE ad_engine_assets
+         SET is_approved = true, approved_at = NOW()
          WHERE id = $1`,
         [slackMessage.asset_id]
       );
     }
 
-    const checkpointType = slackMessage.checkpoint_type;
-    const projectId = slackMessage.project_id;
-
-    // Complete the appropriate wait token via REST API
-    if (checkpointType === "anchor_review") {
-      const asset = await getAssetById(slackMessage.asset_id);
-      await completeWaitToken(`anchor-approval-${projectId}`, {
-        approvedImageUrl: asset.asset_url,
-      });
-    } else if (checkpointType === "scene_review") {
-      // Check if all scenes are approved
-      const allApproved = await checkAllScenesApproved(projectId);
-      if (allApproved) {
-        const approvedUrls = await getApprovedSceneUrls(projectId);
-        await completeWaitToken(`scenes-approval-${projectId}`, {
-          approvedSceneUrls: approvedUrls,
-        });
-      }
-    } else if (checkpointType === "video_review") {
-      const allApproved = await checkAllVideosApproved(projectId);
-      if (allApproved) {
-        const approvedUrls = await getApprovedClipUrls(projectId);
-        await completeWaitToken(`videos-approval-${projectId}`, {
-          approvedClipUrls: approvedUrls,
-        });
-      }
-    } else if (checkpointType === "voiceover_review") {
-      const asset = await getAssetById(slackMessage.asset_id);
-      await completeWaitToken(`voiceover-approval-${projectId}`, {
-        approvedUrl: asset.asset_url,
-      });
-    }
-
-    // Mark checkpoint as resolved
+    // Mark slack message as resolved
     await query(
-      `UPDATE ad_engine_slack_messages 
-       SET resolved = true, resolved_at = NOW() 
+      `UPDATE ad_engine_slack_messages
+       SET resolved = true, resolved_at = NOW()
        WHERE id = $1`,
       [slackMessage.id]
     );
@@ -321,55 +261,4 @@ async function getAssetById(assetId: string) {
     [assetId]
   );
   return result.rows[0];
-}
-
-async function checkAllScenesApproved(projectId: string): Promise<boolean> {
-  const result = await query(
-    `SELECT COUNT(*) as total, 
-            COUNT(CASE WHEN is_approved THEN 1 END) as approved
-     FROM ad_engine_assets 
-     WHERE project_id = $1 AND phase = 'scene'`,
-    [projectId]
-  );
-  const { total, approved } = result.rows[0];
-  return total > 0 && total === approved;
-}
-
-async function checkAllVideosApproved(projectId: string): Promise<boolean> {
-  const result = await query(
-    `SELECT COUNT(DISTINCT scene_number) as total_scenes,
-            COUNT(DISTINCT CASE WHEN is_approved THEN scene_number END) as approved_scenes
-     FROM ad_engine_assets 
-     WHERE project_id = $1 AND phase = 'video'`,
-    [projectId]
-  );
-  const { total_scenes, approved_scenes } = result.rows[0];
-  return total_scenes > 0 && total_scenes === approved_scenes;
-}
-
-async function getApprovedSceneUrls(projectId: string): Promise<Record<number, string>> {
-  const result = await query(
-    `SELECT scene_number, asset_url 
-     FROM ad_engine_assets 
-     WHERE project_id = $1 AND phase = 'scene' AND is_approved = true
-     ORDER BY scene_number`,
-    [projectId]
-  );
-  
-  const urls: Record<number, string> = {};
-  for (const row of result.rows) {
-    urls[row.scene_number] = row.asset_url;
-  }
-  return urls;
-}
-
-async function getApprovedClipUrls(projectId: string): Promise<string[]> {
-  const result = await query(
-    `SELECT asset_url 
-     FROM ad_engine_assets 
-     WHERE project_id = $1 AND phase = 'video' AND is_approved = true
-     ORDER BY scene_number`,
-    [projectId]
-  );
-  return result.rows.map((row) => row.asset_url);
 }
