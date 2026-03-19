@@ -23,7 +23,7 @@ Run autonomously. Do not ask questions unless absolutely blocked. Fix errors you
 ```
 VPS IP:        147.182.235.147
 SSH:           ssh root@147.182.235.147
-SSH Password:  Auto123!Accelerator
+SSH Password:  [STORED_SECURELY — retrieve from password manager]
 OS:            Ubuntu (Docker installed)
 Project dir:   /opt/maps-autopilot
 ```
@@ -64,11 +64,11 @@ SMTP_HOST                 → smtp.gmail.com
 SMTP_PORT                 → 587
 SMTP_USER                 → notification email
 SMTP_PASS                 → Gmail app password
-LATE_DEV_API_KEY          → sk_d6a0e5c782fe840a966e2e53c5a3fabd228d305d3cdf3fc2c60e6b2f304eadd4
-LATE_DEV_PROFILE_ID       → 69a79df642acee650b6da78d
+LATE_DEV_API_KEY          → process.env.LATE_DEV_API_KEY (get from /opt/maps-autopilot/.env)
+LATE_DEV_PROFILE_ID       → process.env.LATE_DEV_PROFILE_ID (get from /opt/maps-autopilot/.env)
 BANNERBEAR_API_KEY        → Bannerbear image generation
-BANNERBEAR_TEMPLATE_ID    → YJBpekZX8BPrZ2XPnO
-KIE_AI_API_KEY            → 3643c098f1eed0653528201263e662bc
+BANNERBEAR_TEMPLATE_ID    → process.env.BANNERBEAR_TEMPLATE_ID (get from /opt/maps-autopilot/.env)
+KIE_AI_API_KEY            → process.env.KIE_AI_API_KEY (get from /opt/maps-autopilot/.env)
 ```
 
 Store all as environment variables in `.env` in the project root. Load with `dotenv`.
@@ -765,7 +765,7 @@ Response: { "post": { "platforms": [{ "platformPostId": "xxx" }] } }
 POST https://api.bannerbear.com/v2/images
 Headers: Authorization: Bearer {BANNERBEAR_API_KEY}
 Body: {
-  "template": "YJBpekZX8BPrZ2XPnO",
+  "template": "{BANNERBEAR_TEMPLATE_ID}",
   "modifications": [
     { "name": "background_image", "image_url": "{photo_or_kie_image_url}" },
     { "name": "Headline", "text": "{graphic_overlay from Claude}" },
@@ -1695,7 +1695,7 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 const pool = new Pool({
-  host: process.env.DB_HOST || '147.182.235.147',
+  host: process.env.DB_HOST || 'localhost',
   port: 5432,
   database: 'maps_autopilot',
   user: 'n8n_user',
@@ -1853,7 +1853,7 @@ export async function overlayText(
   businessName: string
 ): Promise<string> {
   const { data } = await bbClient.post('/images', {
-    template: process.env.BANNERBEAR_TEMPLATE_ID,  // YJBpekZX8BPrZ2XPnO
+    template: process.env.BANNERBEAR_TEMPLATE_ID,
     modifications: [
       { name: 'background_image', image_url: backgroundImageUrl },
       { name: 'Headline', text: headline },
@@ -1952,7 +1952,7 @@ export default defineConfig({
 
 ```bash
 # === DATABASE ===
-DB_HOST=147.182.235.147
+DB_HOST=             # VPS IP — get from password manager or /opt/maps-autopilot/.env
 DB_PORT=5432
 DB_NAME=maps_autopilot
 DB_USER=n8n_user
@@ -1969,8 +1969,8 @@ GOOGLE_REFRESH_TOKEN=    # Google OAuth (pre-authorized)
 GOOGLE_API_KEY=          # Google Places API (WF11) + PageSpeed (WF01B)
 
 # === GBP POSTING ===
-LATE_DEV_API_KEY=sk_d6a0e5c782fe840a966e2e53c5a3fabd228d305d3cdf3fc2c60e6b2f304eadd4
-LATE_DEV_PROFILE_ID=69a79df642acee650b6da78d
+LATE_DEV_API_KEY=            # Get from /opt/maps-autopilot/.env on VPS
+LATE_DEV_PROFILE_ID=         # Get from /opt/maps-autopilot/.env on VPS
 
 # === CRM ===
 GHL_API_KEY=             # GoHighLevel
@@ -1981,9 +1981,9 @@ BRIGHTLOCAL_API_KEY=     # BrightLocal
 BRIGHTLOCAL_API_SECRET=  # BrightLocal (for sig generation)
 
 # === IMAGE GENERATION ===
-KIE_AI_API_KEY=3643c098f1eed0653528201263e662bc
-BANNERBEAR_API_KEY=      # Bannerbear
-BANNERBEAR_TEMPLATE_ID=YJBpekZX8BPrZ2XPnO
+KIE_AI_API_KEY=              # Get from /opt/maps-autopilot/.env on VPS
+BANNERBEAR_API_KEY=          # Bannerbear
+BANNERBEAR_TEMPLATE_ID=      # Get from /opt/maps-autopilot/.env on VPS
 
 # === GEO-GRID TRACKING (Premium) ===
 LOCAL_FALCON_API_KEY=    # Local Falcon (WF15)
@@ -2349,7 +2349,7 @@ GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO n8n_user;
 <!-- SESSION_START -->
 ## Current Session
 <!-- Auto-managed by session_init hook. Overwritten each session. -->
-- Resume: `claude --resume 8df93711-6b4c-482d-aa7f-b95d1c1bf33e`
-- Team: `pact-8df93711`
-- Started: 2026-03-17 15:16:30 UTC
+- Resume: `claude --resume 9a7e11b7-b600-4b89-9843-720f15d20f28`
+- Team: `pact-9a7e11b7`
+- Started: 2026-03-19 20:04:06 UTC
 <!-- SESSION_END -->
