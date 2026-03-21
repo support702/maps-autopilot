@@ -83,15 +83,20 @@ export async function getKieTaskStatus(taskId: string): Promise<KieTaskDetailsRe
  */
 export async function pollKieTask(
   taskId: string,
-  options: { maxAttempts: number; intervalMs: number }
+  options: { maxAttempts?: number; intervalMs?: number } = {}
 ): Promise<KieParsedResult> {
-  for (let i = 0; i < options.maxAttempts; i++) {
-    const result = await getKieTaskStatus(taskId);
-    const state = result.data?.state || "";
+  const maxAttempts = options.maxAttempts ?? 60;
+  const intervalMs = options.intervalMs ?? 10000;
+
+  for (let i = 0; i < maxAttempts; i++) {
+    const status = await getKieTaskStatus(taskId);
+    const state = status.data?.state || "";
+
+    console.log(`Polling Kie.ai task ${taskId} — attempt ${i+1}/${maxAttempts} — status: ${status.data?.state || 'unknown'}`);
 
     if (state.includes("success")) {
       const parsed: KieParsedResult = { state };
-      if (result.data?.resultJson) {
+      if (status.data?.resultJson) {
         try {
           const resultData = JSON.parse(result.data.resultJson);
           parsed.resultUrls = resultData.resultUrls;
@@ -103,16 +108,16 @@ export async function pollKieTask(
     }
     if (state.includes("fail")) {
       throw new Error(
-        `Kie.ai task ${taskId} failed: ${result.data?.error || state}`
+        `Kie.ai task ${taskId} failed: ${status.data?.error || state}`
       );
     }
 
     // In-progress states: waiting, queuing, generating — keep polling
-    await new Promise((resolve) => setTimeout(resolve, options.intervalMs));
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }
 
   throw new Error(
-    `Kie.ai task ${taskId} timed out after ${options.maxAttempts * options.intervalMs}ms`
+    `Kie.ai task ${taskId} timed out after ${maxAttempts * intervalMs}ms`
   );
 }
 
@@ -138,7 +143,7 @@ export async function generateImage(params: {
   }
 
   const taskId = await createKieTask({ model: "nano-banana-pro", input });
-  const result = await pollKieTask(taskId, { maxAttempts: 24, intervalMs: 5000 });
+  const result = await pollKieTask(taskId, { maxAttempts: 60, intervalMs: 5000 });
 
   const imageUrl = result.resultUrls?.[0] || "";
   if (!imageUrl) {
