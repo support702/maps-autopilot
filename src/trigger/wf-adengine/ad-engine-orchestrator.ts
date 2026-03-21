@@ -42,7 +42,7 @@ export const adEngineOrchestrator = schemaTask({
   schema: AdConceptSchema,
   maxDuration: 86400, // 24 hours — allows time for human approvals
   retry: {
-    maxAttempts: 2,
+    maxAttempts: 1,
     factor: 2,
     minTimeoutInMs: 10000,
     maxTimeoutInMs: 60000,

@@ -6,6 +6,7 @@
 import { task } from "@trigger.dev/sdk";
 import { generateVideo } from "./kie-api-client.js";
 import { saveAsset } from "./db.js";
+import { query } from "../../lib/db.js";
 
 interface VideoClipsPayload {
   projectId: string;
@@ -30,6 +31,16 @@ export const generateVideoClips = task({
     maxTimeoutInMs: 60000,
   },
   run: async (payload: VideoClipsPayload) => {
+    // Idempotency guard: skip generation if video assets already exist
+    const existing = await query(
+      'SELECT asset_url FROM ad_engine_assets WHERE project_id = $1 AND phase = $2',
+      [payload.projectId, 'video']
+    );
+    if (existing.rows.length > 0) {
+      console.log(`Video assets already exist for project ${payload.projectId}, skipping generation`);
+      return { clips: [] };
+    }
+
     const clips: Array<{
       sceneNumber: number;
       sceneName: string;

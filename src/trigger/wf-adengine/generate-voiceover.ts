@@ -5,6 +5,7 @@
 
 import { task } from "@trigger.dev/sdk";
 import { saveAsset } from "./db.js";
+import { query } from "../../lib/db.js";
 
 interface VoiceoverPayload {
   projectId: string;
@@ -20,6 +21,16 @@ export const generateVoiceover = task({
     maxTimeoutInMs: 30000,
   },
   run: async (payload: VoiceoverPayload) => {
+    // Idempotency guard: skip generation if voiceover assets already exist
+    const existing = await query(
+      'SELECT asset_url FROM ad_engine_assets WHERE project_id = $1 AND phase = $2',
+      [payload.projectId, 'voiceover']
+    );
+    if (existing.rows.length > 0) {
+      console.log(`Voiceover assets already exist for project ${payload.projectId}, skipping generation`);
+      return { audioUrls: existing.rows.map(r => r.asset_url), approvedUrl: existing.rows[0].asset_url };
+    }
+
     const voiceId = process.env.ELEVENLABS_VOICE_ID || "21m00Tcm4TlvDq8ikWAM"; // Default: Rachel
     const apiKey = process.env.ELEVENLABS_API_KEY;
 

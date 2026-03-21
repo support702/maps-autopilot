@@ -8,6 +8,7 @@ import { task } from "@trigger.dev/sdk";
 import { callClaude } from "../../lib/anthropic.js";
 import { generateImage } from "./kie-api-client.js";
 import { saveAsset, updateProjectStatus } from "./db.js";
+import { query } from "../../lib/db.js";
 import type { StoryboardScene, SceneFrameResult } from "./types.js";
 
 const VARIATIONS_PER_SCENE = 3;
@@ -44,6 +45,16 @@ export const generateSceneFrames = task({
       visualStyle,
       colorGrade,
     } = payload;
+
+    // Idempotency guard: skip generation if scene assets already exist
+    const existing = await query(
+      'SELECT asset_url FROM ad_engine_assets WHERE project_id = $1 AND phase = $2',
+      [projectId, 'scene']
+    );
+    if (existing.rows.length > 0) {
+      console.log(`Scene assets already exist for project ${projectId}, skipping generation`);
+      return { scenes: [] };
+    }
 
     if (!anchorImageUrl) {
       throw new Error("No anchor image URL provided");

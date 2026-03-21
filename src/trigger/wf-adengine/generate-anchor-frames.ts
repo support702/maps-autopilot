@@ -6,6 +6,7 @@
 import { task } from "@trigger.dev/sdk";
 import { generateImage } from "./kie-api-client.js";
 import { saveAsset, updateProjectStatus } from "./db.js";
+import { query } from "../../lib/db.js";
 
 export const generateAnchorFrames = task({
   id: "ad-engine-generate-anchor-frames",
@@ -16,6 +17,16 @@ export const generateAnchorFrames = task({
     aspectRatio: string;
   }): Promise<{ imageUrls: string[]; assetIds: string[] }> => {
     const { projectId, prompts, aspectRatio } = payload;
+
+    // Idempotency guard: skip generation if anchor assets already exist
+    const existing = await query(
+      'SELECT asset_url FROM ad_engine_assets WHERE project_id = $1 AND phase = $2',
+      [projectId, 'anchor']
+    );
+    if (existing.rows.length > 0) {
+      console.log(`Anchor assets already exist for project ${projectId}, skipping generation`);
+      return { imageUrls: existing.rows.map(r => r.asset_url), assetIds: [] };
+    }
 
     console.log(`Generating ${payload.prompts.length} anchor frames for project ${payload.projectId}`);
 
