@@ -17,6 +17,8 @@ export const generateAnchorFrames = task({
   }): Promise<{ imageUrls: string[]; assetIds: string[] }> => {
     const { projectId, prompts, aspectRatio } = payload;
 
+    console.log(`Generating ${payload.prompts.length} anchor frames for project ${payload.projectId}`);
+
     if (!prompts || prompts.length === 0) {
       throw new Error("No anchor prompts provided");
     }

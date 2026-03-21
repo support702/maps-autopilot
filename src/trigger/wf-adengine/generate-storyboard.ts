@@ -121,6 +121,14 @@ Aspect ratios: ${aspectRatios}`;
       throw new Error("Storyboard has no anchor prompts");
     }
 
+    console.log(`[generate-storyboard] Project ${projectId}: Claude returned ${storyboard.anchorPrompts.length} anchor prompts (expected 5). Scenes: ${storyboard.scenes.length}`);
+
+    // Cap anchor prompts at 5 — Claude sometimes returns more
+    if (storyboard.anchorPrompts.length > 5) {
+      console.warn(`[generate-storyboard] Project ${projectId}: Trimming ${storyboard.anchorPrompts.length} anchor prompts down to 5`);
+      storyboard.anchorPrompts = storyboard.anchorPrompts.slice(0, 5);
+    }
+
     await saveStoryboard(projectId, storyboard);
 
     return storyboard;

@@ -47,7 +47,8 @@ export const adEngineOrchestrator = schemaTask({
     minTimeoutInMs: 10000,
     maxTimeoutInMs: 60000,
   },
-  run: async (payload) => {
+  run: async (payload, { ctx }) => {
+    console.log(`Orchestrator started for ${payload.project_name} — run ID: ${ctx.run.id}`);
     // ========================================
     // SETUP
     // ========================================
